@@ -102,3 +102,43 @@ def test_decay_rate_field_zone_multipliers():
     # Rim binds/decays fastest (1.5x), necrotic core slowest (0.3x).
     assert k_d[-1] == pytest.approx(0.02 * 1.5)
     assert k_d[0] == pytest.approx(0.02 * 0.3)
+
+
+def test_batched_pointwise_evaluation_matches_per_sim_grid():
+    # A mixed-simulation batch (different R and d_NP per point, via the R=
+    # and array d_NP_nm arguments) must reproduce exactly what a per-sim
+    # radial_grid + effective_diffusivity call would give for each point --
+    # this is what src/losses.py relies on for a collocation batch drawn
+    # from many simulations at once.
+    R_a, d_NP_a, k_d_base_a = 200.0, 50.0, 0.02
+    R_b, d_NP_b, k_d_base_b = 450.0, 150.0, 0.03
+
+    r_a = np.array([1.0, 100.0, 199.0])
+    r_b = np.array([1.0, 225.0, 449.0])
+
+    r_batch = np.concatenate([r_a, r_b])
+    R_batch = np.concatenate([np.full(3, R_a), np.full(3, R_b)])
+    d_NP_batch = np.concatenate([np.full(3, d_NP_a), np.full(3, d_NP_b)])
+    k_d_base_batch = np.concatenate([np.full(3, k_d_base_a), np.full(3, k_d_base_b)])
+
+    D_eff_batch = effective_diffusivity(r_batch, d_NP_batch, CONFIG, R=R_batch)
+    k_d_batch = decay_rate_field(r_batch, k_d_base_batch, CONFIG, R=R_batch)
+
+    D_eff_a_expected = effective_diffusivity(r_a, d_NP_a, CONFIG, R=R_a)
+    D_eff_b_expected = effective_diffusivity(r_b, d_NP_b, CONFIG, R=R_b)
+    k_d_a_expected = decay_rate_field(r_a, k_d_base_a, CONFIG, R=R_a)
+    k_d_b_expected = decay_rate_field(r_b, k_d_base_b, CONFIG, R=R_b)
+
+    np.testing.assert_allclose(D_eff_batch[:3], D_eff_a_expected)
+    np.testing.assert_allclose(D_eff_batch[3:], D_eff_b_expected)
+    np.testing.assert_allclose(k_d_batch[:3], k_d_a_expected)
+    np.testing.assert_allclose(k_d_batch[3:], k_d_b_expected)
+
+
+def test_oxygen_gradient_default_R_unchanged_for_single_grid():
+    # Backward compatibility: omitting R still uses r[-1], exactly the
+    # original single-simulation-grid behavior relied on by src/fdm_solver.py.
+    r = radial_grid(R_um=300.0, N_r=100, r_min_um=0.001)
+    O2_default = oxygen_gradient(r, CONFIG)
+    O2_explicit = oxygen_gradient(r, CONFIG, R=r[-1])
+    np.testing.assert_array_equal(O2_default, O2_explicit)

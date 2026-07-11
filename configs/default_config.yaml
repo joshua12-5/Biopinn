@@ -87,13 +87,19 @@ biology:
 # PINN architecture
 # ---------------------------------------------------------------------------
 model:
-  input_dim: 2               # (r_norm, t_norm)
+  # Parametric surrogate: (r_norm, t_norm, R_norm, d_NP_norm, C0_norm,
+  # k_d_norm, t_max_norm), matching src/data_pipeline.py's 7-column point
+  # tensor layout (see PARAM_ORDER there). This extends the base "(r_norm,
+  # t_norm) dim 2" skeleton so one trained model generalizes across the 5D
+  # parameter space -- required for Phase 10's optimization surrogate to
+  # query arbitrary (d_NP, C0, R) combinations without retraining.
+  input_dim: 7
   output_dim: 1               # C_norm
   n_layers: 5
   n_neurons: 64
   activation: "tanh"
   init: "xavier_normal"
-  hard_ic_transform: true      # C_NN = sigmoid(f_theta(r,t)) * t_norm
+  hard_ic_transform: true      # C_NN = sigmoid(f_theta(x)) * t_norm
   fourier_features:
     enabled: false             # optional random Fourier feature encoding
     n_features: 32

@@ -5,8 +5,8 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** Phase 3 (data pipeline) complete. See `## Build phases` below —
-> this README will be filled in as each phase lands.
+> **Status:** Phase 4 (PINN core + losses) complete. See `## Build phases`
+> below — this README will be filled in as each phase lands.
 
 ## What this is
 
@@ -92,7 +92,7 @@ package without touching earlier phases.
 | 1 | Microenvironment model (`src/microenvironment.py`) | done |
 | 2 | FDM solver (`src/fdm_solver.py`) | done |
 | 3 | Data pipeline (`src/data_pipeline.py`) | done |
-| 4 | PINN core + losses (`src/model.py`, `src/losses.py`) | pending |
+| 4 | PINN core + losses (`src/model.py`, `src/losses.py`) | done |
 | 5 | Training engine (`src/train.py`) | pending |
 | 6 | Colab notebook (`notebooks/biopinn_train.ipynb`) | pending |
 | 7 | Biology module (`src/biology.py`) | pending |
@@ -105,16 +105,24 @@ package without touching earlier phases.
 
 ## Scientific model summary
 
-- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (2/r)dC/dr] - k_d*C`,
-  Dirichlet at the tumor surface, Neumann symmetry at the center.
+- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (1/r)dC/dr] - k_d*C`,
+  Dirichlet at the tumor surface, Neumann symmetry at the center. (The FDM
+  solver spec and the guide's own reference code both use the `1/r`
+  cylindrical-radial term rather than the idealized `2/r` spherical form
+  quoted elsewhere; `src/fdm_solver.py` and `src/losses.py` are kept
+  consistent with each other on this.)
 - **Three-zone microenvironment:** proliferating rim / quiescent zone /
   necrotic core, each with a distinct diffusion correction factor and
   binding-rate multiplier derived from a steady-state oxygen gradient.
 - **Biological response:** Hill-equation death rate → survival fraction →
   viability and cytotoxicity maps → penetration depth.
-- **PINN:** 5×64 tanh network, hard initial-condition output transform,
-  composite loss (data + physics + Dirichlet + Neumann + IC), two-phase
-  Adam → L-BFGS training.
+- **PINN:** 5×64 tanh network, **parametric 7-dim input**
+  `(r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm)` so one
+  trained model generalizes across the full 5D parameter space (extends the
+  base "(r_norm, t_norm)" skeleton — required for the optimization surrogate
+  below to query arbitrary parameter combinations without retraining), hard
+  initial-condition output transform, composite loss (data + physics +
+  Dirichlet + Neumann + IC), two-phase Adam → L-BFGS training.
 - **Optimization:** the trained PINN as a differentiable surrogate for a
   grid search over nanoparticle diameter and dose, at four tumor radii.
 

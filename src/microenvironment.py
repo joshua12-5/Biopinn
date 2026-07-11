@@ -41,7 +41,7 @@ def radial_grid(R_um: float, N_r: int, r_min_um: float) -> np.ndarray:
     return np.linspace(r_min_um, R_um, N_r)
 
 
-def oxygen_gradient(r: np.ndarray, config: dict) -> np.ndarray:
+def oxygen_gradient(r: np.ndarray, config: dict, R: np.ndarray | float | None = None) -> np.ndarray:
     """Steady-state oxygen diffusion-consumption profile over the radial grid.
 
     Solves D_O2 * lap(O2) = k_O2 * O2 in spherical coordinates with a fixed
@@ -51,24 +51,38 @@ def oxygen_gradient(r: np.ndarray, config: dict) -> np.ndarray:
     the L'Hopital limit O2(0) = O2_surface * R * lambda / sinh(R*lambda).
 
     Args:
-        r: radial grid (um), r[-1] is treated as the tumor radius R.
+        r: radial positions (um). May be a single simulation's radial grid
+            or an arbitrary batch of points from many simulations.
         config: full config dict (reads microenvironment.oxygen and constants).
+        R: tumor radius (um) for each point in `r`. Defaults to r[-1], i.e.
+            "r is one simulation's grid and its own last point is R" (the
+            src/fdm_solver.py usage). Pass an array the same shape as `r`
+            (or a scalar) to evaluate points drawn from different tumor
+            radii, e.g. a mixed-simulation PINN collocation batch.
 
     Returns:
-        Oxygen concentration (% saturation) at each grid point.
+        Oxygen concentration (% saturation) at each point in `r`.
     """
     ox = config["microenvironment"]["oxygen"]
     D_O2 = ox["D_oxygen_um2_per_hr"]
     k_O2 = ox["consumption_rate_per_hr"]
     O2_surface = ox["surface_o2_percent"]
 
-    R = r[-1]
+    r = np.asarray(r, dtype=float)
+    R = np.asarray(r[-1] if R is None else R, dtype=float)
     lam = np.sqrt(k_O2 / D_O2)
+
+    def R_at(mask: np.ndarray) -> np.ndarray:
+        return R if R.ndim == 0 else R[mask]
 
     O2 = np.empty_like(r, dtype=float)
     nonzero = r > 0
-    O2[nonzero] = O2_surface * R * np.sinh(r[nonzero] * lam) / (r[nonzero] * np.sinh(R * lam))
-    O2[~nonzero] = O2_surface * R * lam / np.sinh(R * lam)
+    R_nz = R_at(nonzero)
+    r_nz = r[nonzero]
+    O2[nonzero] = O2_surface * R_nz * np.sinh(r_nz * lam) / (r_nz * np.sinh(R_nz * lam))
+    if np.any(~nonzero):
+        R_z = R_at(~nonzero)
+        O2[~nonzero] = O2_surface * R_z * lam / np.sinh(R_z * lam)
     return O2
 
 
@@ -90,29 +104,42 @@ def assign_zones(r: np.ndarray, oxygen: np.ndarray, config: dict) -> np.ndarray:
     return zones
 
 
-def effective_diffusivity(r: np.ndarray, d_NP_nm: float, config: dict) -> np.ndarray:
-    """D_eff(r) = f_zone(r) * D_free, per grid point, in um^2/hr.
+def effective_diffusivity(
+    r: np.ndarray, d_NP_nm: np.ndarray | float, config: dict, R: np.ndarray | float | None = None
+) -> np.ndarray:
+    """D_eff(r) = f_zone(r) * D_free, per point, in um^2/hr.
 
     D_free is computed via Stokes-Einstein (m^2/s) and converted to um^2/hr
     to match the radial grid (um) and time grid (hr) used by the FDM solver.
+    `d_NP_nm` and `R` may be scalars (one simulation) or arrays the same
+    shape as `r` (a batch of points drawn from different simulations, e.g.
+    a PINN collocation batch -- see oxygen_gradient's `R` argument).
     """
     const = config["constants"]
-    D_free_m2_s = stokes_einstein_diffusivity(d_NP_nm, const["T"], const["eta"], const["k_B"])
+    D_free_m2_s = stokes_einstein_diffusivity(
+        np.asarray(d_NP_nm, dtype=float), const["T"], const["eta"], const["k_B"]
+    )
     D_free_um2_hr = D_free_m2_s * 1e12 * 3600.0
 
-    oxygen = oxygen_gradient(r, config)
+    oxygen = oxygen_gradient(r, config, R=R)
     zones = assign_zones(r, oxygen, config)
     f_zone = config["microenvironment"]["f_zone"]
 
-    D_eff = np.array([D_free_um2_hr * f_zone[z] for z in zones])
-    return D_eff
+    f_vals = np.array([f_zone[z] for z in zones])
+    return D_free_um2_hr * f_vals
 
 
-def decay_rate_field(r: np.ndarray, k_d_base: float, config: dict) -> np.ndarray:
-    """k_d(r) = k_d_base * zone_multiplier(r), per grid point (1/hr)."""
-    oxygen = oxygen_gradient(r, config)
+def decay_rate_field(
+    r: np.ndarray, k_d_base: np.ndarray | float, config: dict, R: np.ndarray | float | None = None
+) -> np.ndarray:
+    """k_d(r) = k_d_base * zone_multiplier(r), per point (1/hr).
+
+    `k_d_base` and `R` may be scalars or arrays the same shape as `r` (see
+    effective_diffusivity's docstring for the batched-collocation use case).
+    """
+    oxygen = oxygen_gradient(r, config, R=R)
     zones = assign_zones(r, oxygen, config)
     multiplier = config["microenvironment"]["k_d_multiplier"]
 
-    k_d = np.array([k_d_base * multiplier[z] for z in zones])
-    return k_d
+    f_vals = np.array([multiplier[z] for z in zones])
+    return np.asarray(k_d_base, dtype=float) * f_vals
