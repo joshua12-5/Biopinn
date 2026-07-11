@@ -5,8 +5,8 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** Phase 8 (evaluation) complete. See `## Build phases` below —
-> this README will be filled in as each phase lands.
+> **Status:** Phase 9 (ablation study) complete. See `## Build phases`
+> below — this README will be filled in as each phase lands.
 
 ## What this is
 
@@ -97,7 +97,7 @@ package without touching earlier phases.
 | 6 | Colab notebook (`notebooks/biopinn_train.ipynb`) | done |
 | 7 | Biology module (`src/biology.py`) | done |
 | 8 | Evaluation (`src/evaluate.py`, `scripts/run_evaluation.py`) | done |
-| 9 | Ablation study (`src/ablation.py`, `scripts/run_ablation.py`) | pending |
+| 9 | Ablation study (`src/ablation.py`, `scripts/run_ablation.py`) | done |
 | 10 | Optimization + efficiency (`src/optimize.py`, `scripts/run_optimization.py`) | pending |
 | 11 | Visualization (`src/visualize.py`, `scripts/make_figures.py`) | pending |
 | 12 | Results dashboard (`app/`, `scripts/run_dashboard.py`) | pending |

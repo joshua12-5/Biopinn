@@ -202,6 +202,27 @@ def build_split_tensors(
     return tensors
 
 
+def load_processed_dataset(config: dict) -> dict:
+    """Load the train/val/test tensors + normalization stats written by
+    save_processed_dataset, without regenerating or re-solving anything.
+
+    Returns the same {"splits": ..., "stats": ...} shape build_dataset does
+    (minus "sims", which isn't persisted) -- e.g. for src/ablation.py to
+    train a baseline on the exact same data as an already-trained checkpoint.
+    """
+    processed_dir = resolve_path(config, "processed")
+
+    splits = {}
+    for split_name in ("train", "val", "test"):
+        with np.load(processed_dir / f"{split_name}.npz") as data:
+            splits[split_name] = {key: data[key] for key in data.files}
+
+    with open(processed_dir / "normalization_stats.json") as f:
+        stats = json.load(f)
+
+    return {"splits": splits, "stats": stats}
+
+
 def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_split: dict | None = None) -> None:
     """Write train/val/test .npz files, normalization_stats.json, and (if
     `sims_by_split` is given) sim_params.json to paths.processed.
