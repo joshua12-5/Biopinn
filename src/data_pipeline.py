@@ -28,6 +28,7 @@ simulation-specific (unconditioned) model is desired instead.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 from scipy.stats import qmc
@@ -58,28 +59,46 @@ def latin_hypercube_sample(n_samples: int, config: dict, seed: int | None) -> np
     return qmc.scale(sample, l_bounds, u_bounds)
 
 
-def generate_dataset(n_simulations: int, config: dict, seed: int | None) -> list[dict]:
-    """LHS-sample parameters, solve each with src.fdm_solver.solve_fdm, return raw sims."""
+def generate_dataset(n_simulations: int, config: dict, seed: int | None, n_jobs: int = 1) -> list[dict]:
+    """LHS-sample parameters, solve each with src.fdm_solver.solve_fdm, return raw sims.
+
+    Args:
+        n_jobs: number of worker processes for parallel FDM solving. 1 (the
+            default) solves sequentially in-process. > 1 uses a
+            ProcessPoolExecutor -- each simulation is independent, so this
+            scales close to linearly with core count. The full 2000-sim
+            production dataset takes ~3 hours single-threaded (some
+            LHS-sampled small-R/small-d_NP combinations need heavy CFL
+            sub-stepping, see src/fdm_solver.py); pass n_jobs=os.cpu_count()
+            on Colab to cut that down substantially.
+    """
     params = latin_hypercube_sample(n_simulations, config, seed)
 
-    sims = []
-    for i in range(n_simulations):
-        R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr = params[i]
-        fdm_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config)
-        sims.append(
-            {
-                "sim_id": i,
-                "R_um": R_um,
-                "d_NP_nm": d_NP_nm,
-                "C0_uM": C0_uM,
-                "k_d_per_hr": k_d_per_hr,
-                "t_max_hr": t_max_hr,
-                "r": fdm_result["r"],
-                "t": fdm_result["t"],
-                "C": fdm_result["C"],
-            }
-        )
-    return sims
+    if n_jobs == 1:
+        results = [_solve_one((i, params[i], config)) for i in range(n_simulations)]
+    else:
+        with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+            results = list(pool.map(_solve_one, [(i, params[i], config) for i in range(n_simulations)]))
+
+    return sorted(results, key=lambda sim: sim["sim_id"])
+
+
+def _solve_one(args: tuple[int, np.ndarray, dict]) -> dict:
+    """Module-level (picklable) worker: solve one LHS-sampled parameter row."""
+    sim_id, param_row, config = args
+    R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr = param_row
+    fdm_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config)
+    return {
+        "sim_id": sim_id,
+        "R_um": R_um,
+        "d_NP_nm": d_NP_nm,
+        "C0_uM": C0_uM,
+        "k_d_per_hr": k_d_per_hr,
+        "t_max_hr": t_max_hr,
+        "r": fdm_result["r"],
+        "t": fdm_result["t"],
+        "C": fdm_result["C"],
+    }
 
 
 def sample_training_points(sim: dict, config: dict, rng: np.random.Generator | None = None) -> dict:
@@ -195,18 +214,18 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict) -> None:
         json.dump(stats, f, indent=2)
 
 
-def build_dataset(config: dict, seed: int | None = None, save: bool = True) -> dict:
+def build_dataset(config: dict, seed: int | None = None, save: bool = True, n_jobs: int = 1) -> dict:
     """End-to-end pipeline: LHS sample -> solve FDM -> split -> normalize -> save.
 
     Returns a dict with the raw sims and processed tensors per split plus the
     normalization stats, so callers (and tests) can inspect the result without
-    re-reading it from disk.
+    re-reading it from disk. See generate_dataset's docstring for `n_jobs`.
     """
     ds_cfg = config["dataset"]
     split_cfg = ds_cfg["split"]
     n_total = split_cfg["train"] + split_cfg["val"] + split_cfg["test"]
 
-    sims = generate_dataset(n_total, config, seed)
+    sims = generate_dataset(n_total, config, seed, n_jobs=n_jobs)
 
     n_train, n_val = split_cfg["train"], split_cfg["val"]
     sims_by_split = {

@@ -67,6 +67,17 @@ def test_generate_dataset_returns_solved_sims():
             assert sim[p] > 0
 
 
+def test_generate_dataset_parallel_matches_sequential():
+    sims_seq = generate_dataset(6, FAST_CONFIG, seed=8, n_jobs=1)
+    sims_par = generate_dataset(6, FAST_CONFIG, seed=8, n_jobs=2)
+    assert len(sims_par) == len(sims_seq)
+    for a, b in zip(sims_seq, sims_par):
+        assert a["sim_id"] == b["sim_id"]
+        assert a["R_um"] == pytest.approx(b["R_um"])
+        assert a["d_NP_nm"] == pytest.approx(b["d_NP_nm"])
+        np.testing.assert_allclose(a["C"], b["C"])
+
+
 def test_sample_training_points_counts_and_bounds():
     sims = generate_dataset(1, FAST_CONFIG, seed=2)
     sim = sims[0]
