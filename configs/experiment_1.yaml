@@ -6,6 +6,11 @@
 
 experiment_name: "biopinn_experiment_1_dev"
 
+fdm:
+  N_r: 50            # coarser grid than the production 200 points
+  N_t_initial: 100    # keeps CFL sub-stepping (and thus wall-clock time) small
+                        # even for the worst-case small-R/small-d_NP corner
+
 dataset:
   n_simulations: 20
   split:

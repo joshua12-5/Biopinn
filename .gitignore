@@ -14,7 +14,9 @@ venv/
 
 # Data & artifacts (large / generated; produced on Colab, dropped in locally)
 data/raw_simulations/*
+data/raw_simulations_dev/*
 data/processed/*
+data/processed_dev/*
 data/viability_maps/*
 !data/raw_simulations/.gitkeep
 !data/processed/.gitkeep
