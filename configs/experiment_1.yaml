@@ -1,0 +1,35 @@
+# Experiment 1 — fast local/dev run.
+# Overrides default_config.yaml with a small dataset and short training
+# schedule so the full pipeline can be smoke-tested on a laptop CPU in
+# minutes instead of hours. Loaded as: default_config.yaml, then this file
+# applied on top (see src/config.py::load_config).
+
+experiment_name: "biopinn_experiment_1_dev"
+
+dataset:
+  n_simulations: 20
+  split:
+    train: 14
+    val: 3
+    test: 3
+  points_per_sim:
+    data: 500
+    collocation: 1000
+    bc_surface: 100
+    bc_center: 100
+    ic: 100
+
+training:
+  adam:
+    iters: 500
+    step_lr_step_size: 100
+  lbfgs:
+    iters: 100
+  convergence:
+    patience_epochs: 20
+
+paths:
+  raw_simulations: "data/raw_simulations_dev"
+  processed: "data/processed_dev"
+  model_checkpoint: "artifacts/biopinn_model_dev.pt"
+  normalization_stats: "artifacts/normalization_stats_dev.json"
