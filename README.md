@@ -5,8 +5,8 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** Phase 0 (scaffold) complete. See `## Build phases` below —
-> this README will be filled in as each phase lands.
+> **Status:** Phase 1 (microenvironment model) complete. See `## Build phases`
+> below — this README will be filled in as each phase lands.
 
 ## What this is
 
@@ -89,7 +89,7 @@ package without touching earlier phases.
 | Phase | Delivers | Status |
 |---|---|---|
 | 0 | Scaffold: repo structure, configs, requirements | done |
-| 1 | Microenvironment model (`src/microenvironment.py`) | pending |
+| 1 | Microenvironment model (`src/microenvironment.py`) | done |
 | 2 | FDM solver (`src/fdm_solver.py`) | pending |
 | 3 | Data pipeline (`src/data_pipeline.py`) | pending |
 | 4 | PINN core + losses (`src/model.py`, `src/losses.py`) | pending |

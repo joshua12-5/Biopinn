@@ -29,11 +29,13 @@ microenvironment:
     quiescent_zone: 0.8
     necrotic_core: 0.3
   oxygen:
-    D_oxygen: 2.0e-5        # cm^2/s, approximate O2 diffusivity in tissue (placeholder, refined in Phase 1)
-    consumption_rate: 1.0    # relative consumption rate used in steady-state gradient
-    surface_o2: 1.0          # normalized O2 at r=R
-    hypoxia_threshold: 0.10  # boundary: quiescent -> necrotic
-    necrotic_threshold: 0.02 # boundary defining necrotic core
+    D_oxygen_um2_per_hr: 2000.0       # um^2/hr, O2 diffusivity in tissue
+    consumption_rate_per_hr: 1.0      # k_O2, 1/hr (tuned so R=100um tumors stay
+                                        # normoxic while R=400-500um develop a
+                                        # full rim/quiescent/necrotic structure)
+    surface_o2_percent: 8.0            # O2 at r=R, % saturation (normoxic culture)
+    hypoxia_threshold_percent: 1.0     # boundary: proliferating -> quiescent
+    necrotic_threshold_percent: 0.1    # boundary: quiescent -> necrotic
 
 # ---------------------------------------------------------------------------
 # Governing PDE / FDM solver
