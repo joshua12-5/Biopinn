@@ -1,0 +1,152 @@
+<meta charset="utf-8" />
+<title>BIOPINN — results dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/css/dashboard.css" />
+
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">BIOPINN</span>
+      <span class="brand-subtitle">results instrument</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="status-pill" class="status-pill" data-state="busy"><span class="status-dot"></span><span id="status-text">Loading trained model…</span></span>
+      <button class="btn" id="btn-export-json">Export metrics (JSON)</button>
+      <button class="btn" id="btn-export-csv">Export metrics (CSV)</button>
+      <button class="btn btn-accent" id="btn-run-optimization">Run optimization</button>
+    </div>
+  </header>
+
+  <aside class="sidebar">
+    <div class="control-group">
+      <h2>Tumor</h2>
+      <div class="control">
+        <label for="in-R_um">Tumor radius <span class="value"><span id="val-R_um">—</span><span class="unit"> μm</span></span></label>
+        <input type="range" id="in-R_um" />
+      </div>
+    </div>
+    <div class="control-group">
+      <h2>Nanoparticle</h2>
+      <div class="control">
+        <label for="in-d_NP_nm">Nanoparticle diameter <span class="value"><span id="val-d_NP_nm">—</span><span class="unit"> nm</span></span></label>
+        <input type="range" id="in-d_NP_nm" />
+      </div>
+    </div>
+    <div class="control-group">
+      <h2>Dosing</h2>
+      <div class="control">
+        <label for="in-C0_uM">Surface concentration <span class="value"><span id="val-C0_uM">—</span><span class="unit"> μM</span></span></label>
+        <input type="range" id="in-C0_uM" />
+      </div>
+      <div class="control">
+        <label for="in-k_d_per_hr">Decay rate <span class="value"><span id="val-k_d_per_hr">—</span><span class="unit"> hr⁻¹</span></span></label>
+        <input type="range" id="in-k_d_per_hr" />
+      </div>
+    </div>
+    <div class="control-group">
+      <h2>Simulation window</h2>
+      <div class="control">
+        <label for="in-t_max_hr">Duration <span class="value"><span id="val-t_max_hr">—</span><span class="unit"> hr</span></span></label>
+        <input type="range" id="in-t_max_hr" />
+      </div>
+      <div class="control">
+        <label for="in-time">Display time <span class="value"><span id="val-time">—</span><span class="unit"> hr</span></span></label>
+        <input type="range" id="in-time" min="0" max="1" step="0.01" value="1" />
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="card span-3">
+      <h3>Treatment effectiveness</h3>
+      <p class="caption">Volume-averaged kill fraction at the current settings</p>
+      <div class="stat-value" id="stat-kill-fraction">—</div>
+      <div class="stat-label">η, at t = simulation duration</div>
+    </section>
+
+    <section class="card span-3">
+      <h3>Penetration depth</h3>
+      <p class="caption">At the selected display time</p>
+      <div class="stat-value" id="stat-penetration">—</div>
+      <div class="stat-label">μm inward from the tumor surface</div>
+    </section>
+
+    <section class="card span-3">
+      <h3>Resistance-risk volume</h3>
+      <p class="caption">Sub-therapeutic zone (below 0.1×IC50)</p>
+      <div class="stat-value" id="stat-resistance">—</div>
+      <div class="stat-label">% of tumor volume</div>
+    </section>
+
+    <section class="card span-3">
+      <h3>Test-set quality</h3>
+      <p class="caption">H1: RMSE &lt; 0.05 μM, R² &gt; 0.990</p>
+      <div class="stat-value" id="stat-h1">—</div>
+      <div class="stat-label" id="stat-h1-detail">evaluating…</div>
+    </section>
+
+    <section class="card span-12">
+      <h3>Concentration field C(r, t)</h3>
+      <p class="caption">Predicted by the trained PINN surrogate for the current parameters</p>
+      <div id="plot-concentration-heatmap" class="plot tall"></div>
+    </section>
+
+    <section class="card span-6">
+      <h3>Radial concentration profile</h3>
+      <p class="caption">At the selected display time</p>
+      <div id="plot-radial-profile" class="plot"></div>
+    </section>
+
+    <section class="card span-6">
+      <h3>Penetration depth vs. time</h3>
+      <div id="plot-penetration" class="plot"></div>
+    </section>
+
+    <section class="card span-6">
+      <h3>Cell viability V(r, t)</h3>
+      <p class="caption">Three-zone microenvironment overlay</p>
+      <div class="zone-legend" id="zone-legend"></div>
+      <div id="plot-viability" class="plot"></div>
+    </section>
+
+    <section class="card span-6">
+      <h3>Cytotoxicity Cyt(r, t)</h3>
+      <p class="caption">And the sub-therapeutic resistance-risk zone</p>
+      <div id="plot-cytotoxicity" class="plot"></div>
+    </section>
+
+    <section class="card span-12">
+      <h3>Optimization: optimal (d_NP*, C0*) per tumor radius</h3>
+      <p class="caption">Surrogate grid search maximizing volume-averaged kill fraction η, compared against your current settings</p>
+      <div id="optimization-content"><p class="empty-state">Running grid search across configured radii…</p></div>
+    </section>
+
+    <section class="card span-4">
+      <h3>Six-metric quality</h3>
+      <p class="caption">Held-out test set vs. publication thresholds</p>
+      <div id="metrics-content"><p class="empty-state">Re-solving FDM references for the test set…</p></div>
+    </section>
+
+    <section class="card span-4">
+      <h3>PDE-residual distribution</h3>
+      <div id="plot-residual-hist" class="plot short"></div>
+    </section>
+
+    <section class="card span-4">
+      <h3>PINN vs. FDM overlay</h3>
+      <p class="caption" id="overlay-caption">One held-out test simulation</p>
+      <div id="plot-overlay" class="plot short"></div>
+    </section>
+
+    <section class="card span-12">
+      <h3>Ablation: physics-informed vs. unconstrained (H5)</h3>
+      <p class="caption">w_phys = 1 (BIOPINN) vs. w_phys = 0 (identical-architecture baseline)</p>
+      <div id="ablation-content"><p class="empty-state">Checking for an ablation baseline checkpoint…</p></div>
+    </section>
+
+    <p class="footer-note">BIOPINN — loads trained artifacts only, never retrains from this dashboard. All units: μm, μM, hr.</p>
+  </main>
+</div>
+
+<script src="/static/vendor/plotly-cartesian.min.js"></script>
+<script src="/static/js/dashboard.js"></script>
