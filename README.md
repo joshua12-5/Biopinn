@@ -5,7 +5,7 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** Phase 4 (PINN core + losses) complete. See `## Build phases`
+> **Status:** Phase 5 (training engine) complete. See `## Build phases`
 > below — this README will be filled in as each phase lands.
 
 ## What this is
@@ -93,7 +93,7 @@ package without touching earlier phases.
 | 2 | FDM solver (`src/fdm_solver.py`) | done |
 | 3 | Data pipeline (`src/data_pipeline.py`) | done |
 | 4 | PINN core + losses (`src/model.py`, `src/losses.py`) | done |
-| 5 | Training engine (`src/train.py`) | pending |
+| 5 | Training engine (`src/train.py`) | done |
 | 6 | Colab notebook (`notebooks/biopinn_train.ipynb`) | pending |
 | 7 | Biology module (`src/biology.py`) | pending |
 | 8 | Evaluation (`src/evaluate.py`, `scripts/run_evaluation.py`) | pending |

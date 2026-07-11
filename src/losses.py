@@ -125,14 +125,24 @@ def ic_loss(model: BIOPINN, X: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.mean((model(X) - y) ** 2)
 
 
-def composite_loss(model: BIOPINN, batch: dict, config: dict, norm_stats: dict) -> dict:
+def composite_loss(
+    model: BIOPINN,
+    batch: dict,
+    config: dict,
+    norm_stats: dict,
+    weight_overrides: dict | None = None,
+) -> dict:
     """Weighted sum of all five loss terms.
 
     `batch` uses the same keys src/data_pipeline.py's processed .npz files
     use: data_X/data_y, collocation_X, bc_surface_X/bc_surface_y,
     bc_center_X, ic_X/ic_y.
+
+    `weight_overrides` optionally replaces individual config["loss"] weights
+    (e.g. {"w_phys": 0.1}) without mutating the shared config dict -- used by
+    src/train.py's w_phys warmup ramp and NaN-recovery safeguard.
     """
-    loss_cfg = config["loss"]
+    weights = {**config["loss"], **(weight_overrides or {})}
 
     L_data = data_loss(model, batch["data_X"], batch["data_y"])
     L_phys = physics_loss(model, batch["collocation_X"], config, norm_stats)
@@ -141,11 +151,11 @@ def composite_loss(model: BIOPINN, batch: dict, config: dict, norm_stats: dict) 
     L_ic = ic_loss(model, batch["ic_X"], batch["ic_y"])
 
     total = (
-        loss_cfg["w_data"] * L_data
-        + loss_cfg["w_phys"] * L_phys
-        + loss_cfg["w_bc"] * L_bc
-        + loss_cfg["w_neu"] * L_neu
-        + loss_cfg["w_ic"] * L_ic
+        weights["w_data"] * L_data
+        + weights["w_phys"] * L_phys
+        + weights["w_bc"] * L_bc
+        + weights["w_neu"] * L_neu
+        + weights["w_ic"] * L_ic
     )
 
     return {"total": total, "data": L_data, "phys": L_phys, "bc": L_bc, "neu": L_neu, "ic": L_ic}
