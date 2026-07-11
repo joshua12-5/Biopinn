@@ -24,19 +24,13 @@ import json
 import sys
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.biology import predict_concentration_field
 from src.config import load_config, resolve_path
 from src.evaluate import full_evaluation_report, resolve_test_simulations
 from src.model import load_checkpoint
+from src.visualize import plot_pde_residual_histogram, plot_pinn_vs_fdm_overlay
 
 THRESHOLD_UNITS = {
     "rmse": "uM",
@@ -122,44 +116,14 @@ def save_metrics(report: dict, output_dir: Path) -> None:
 
 def make_residual_histogram_figure(report: dict, config: dict, output_dir: Path) -> None:
     residuals = report["residual_histogram"]
-    threshold = config["evaluation"]["thresholds"]["mean_pde_residual"]
-
-    fig, ax = plt.subplots(figsize=(7, 5))
-    ax.hist(residuals, bins=60, color="steelblue", alpha=0.85)
-    ax.axvline(residuals.mean(), color="black", linestyle="-", label=f"mean = {residuals.mean():.2e}")
-    ax.axvline(threshold, color="red", linestyle="--", label=f"threshold = {threshold:.0e}")
-    ax.set_xlabel("|PDE residual|")
-    ax.set_ylabel("count")
-    ax.set_title("PDE-residual distribution over the test set's collocation points")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(output_dir / "pde_residual_histogram.png", dpi=150)
-    plt.close(fig)
+    plot_pde_residual_histogram(residuals, config, save_path=str(output_dir / "pde_residual_histogram.png"))
 
 
-def make_pinn_vs_fdm_overlay_figure(model, sims: list[dict], norm_stats: dict, output_dir: Path) -> None:
+def make_pinn_vs_fdm_overlay_figure(model, sims: list[dict], norm_stats: dict, config: dict, output_dir: Path) -> None:
     sim = sims[0]
-    r, t, C_true = sim["r"], sim["t"], sim["C"]
+    r, t = sim["r"], sim["t"]
     C_pred = predict_concentration_field(model, r, t, sim, norm_stats)
-
-    snapshot_hours = [h for h in (6, 24, 48, 72) if h <= sim["t_max_hr"]] or [sim["t_max_hr"]]
-    fig, axes = plt.subplots(1, len(snapshot_hours), figsize=(4.5 * len(snapshot_hours), 4.5), squeeze=False)
-    for ax, hours in zip(axes[0], snapshot_hours):
-        idx = int(np.argmin(np.abs(t - hours)))
-        ax.plot(r, C_true[idx, :], "k-", linewidth=2, label="FDM reference")
-        ax.plot(r, C_pred[idx, :], "r--", linewidth=2, label="PINN prediction")
-        ax.set_xlabel("radius (um)")
-        ax.set_ylabel("concentration (uM)")
-        ax.set_title(f"t={t[idx]:.0f}hr")
-        ax.grid(alpha=0.3)
-    axes[0][0].legend(fontsize=8)
-    fig.suptitle(
-        f"PINN vs. FDM -- test sim {sim['sim_id']} "
-        f"(R={sim['R_um']:.0f}um, d_NP={sim['d_NP_nm']:.0f}nm, C0={sim['C0_uM']:.1f}uM)"
-    )
-    fig.tight_layout()
-    fig.savefig(output_dir / "pinn_vs_fdm_overlay.png", dpi=150)
-    plt.close(fig)
+    plot_pinn_vs_fdm_overlay(sim, C_pred, config, save_path=str(output_dir / "pinn_vs_fdm_overlay.png"))
 
 
 def main() -> None:
@@ -196,7 +160,7 @@ def main() -> None:
     output_dir = resolve_path(config, "results") / "evaluation"
     save_metrics(report, output_dir)
     make_residual_histogram_figure(report, config, output_dir)
-    make_pinn_vs_fdm_overlay_figure(model, sims, norm_stats, output_dir)
+    make_pinn_vs_fdm_overlay_figure(model, sims, norm_stats, config, output_dir)
     print(f"Saved pde_residual_histogram.png / pinn_vs_fdm_overlay.png to {output_dir}")
 
 
