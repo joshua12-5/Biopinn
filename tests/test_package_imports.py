@@ -1,4 +1,4 @@
-"""Phase 0 smoke test: every src/ module imports without error."""
+"""Phase 0 smoke test: every src/ module (+ the dashboard app) imports without error."""
 
 import importlib
 
@@ -15,6 +15,7 @@ MODULES = [
     "src.ablation",
     "src.optimize",
     "src.visualize",
+    "app.server",
 ]
 
 
