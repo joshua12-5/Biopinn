@@ -25,6 +25,9 @@ data/viability_maps/*
 artifacts/*
 !artifacts/.gitkeep
 
+results/*
+!results/.gitkeep
+
 # Logs & checkpoints
 *.log
 logs/

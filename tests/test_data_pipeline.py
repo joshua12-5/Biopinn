@@ -181,5 +181,16 @@ def test_build_dataset_end_to_end_small(tmp_path):
         loaded = np.load(processed_dir / "train.npz")
         assert "data_X" in loaded
         assert loaded["data_X"].shape[1] == 7
+
+        sim_params_path = processed_dir / "sim_params.json"
+        assert sim_params_path.exists()
+        with open(sim_params_path) as f:
+            sim_params = json.load(f)
+        assert set(sim_params.keys()) == {"train", "val", "test"}
+        assert len(sim_params["test"]) == split_cfg["test"]
+        for entry in sim_params["test"]:
+            assert set(entry.keys()) == {"sim_id"} | set(PARAM_ORDER)
+        test_sim_ids = {e["sim_id"] for e in sim_params["test"]}
+        assert test_sim_ids == {sim["sim_id"] for sim in result["sims"]["test"]}
     finally:
         cfg_module.REPO_ROOT = original_root

@@ -202,8 +202,16 @@ def build_split_tensors(
     return tensors
 
 
-def save_processed_dataset(splits: dict, stats: dict, config: dict) -> None:
-    """Write train/val/test .npz files and normalization_stats.json to paths.processed."""
+def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_split: dict | None = None) -> None:
+    """Write train/val/test .npz files, normalization_stats.json, and (if
+    `sims_by_split` is given) sim_params.json to paths.processed.
+
+    sim_params.json stores each split's exact (sim_id, R_um, d_NP_nm, C0_uM,
+    k_d_per_hr, t_max_hr) 5-tuples -- lightweight enough to keep alongside
+    the point tensors, and lets src/evaluate.py deterministically re-solve
+    the full FDM reference field for the held-out test set without needing
+    to persist every raw (r, t, C) array to disk.
+    """
     processed_dir = resolve_path(config, "processed")
     processed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -212,6 +220,14 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict) -> None:
 
     with open(processed_dir / "normalization_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
+
+    if sims_by_split is not None:
+        sim_params = {
+            split_name: [{k: (float(sim[k]) if k != "sim_id" else int(sim[k])) for k in ("sim_id",) + PARAM_ORDER} for sim in sims]
+            for split_name, sims in sims_by_split.items()
+        }
+        with open(processed_dir / "sim_params.json", "w") as f:
+            json.dump(sim_params, f, indent=2)
 
 
 def build_dataset(config: dict, seed: int | None = None, save: bool = True, n_jobs: int = 1) -> dict:
@@ -243,6 +259,6 @@ def build_dataset(config: dict, seed: int | None = None, save: bool = True, n_jo
     }
 
     if save:
-        save_processed_dataset(splits, stats, config)
+        save_processed_dataset(splits, stats, config, sims_by_split=sims_by_split)
 
     return {"sims": sims_by_split, "splits": splits, "stats": stats}

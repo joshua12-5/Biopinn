@@ -185,3 +185,4 @@ paths:
   artifacts: "artifacts"
   model_checkpoint: "artifacts/biopinn_model.pt"
   normalization_stats: "artifacts/normalization_stats.json"
+  results: "results"          # evaluation/ablation/optimization reports + figures
