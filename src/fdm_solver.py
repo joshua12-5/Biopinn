@@ -47,25 +47,35 @@ def solve_fdm(
     t_max_hr: float,
     config: dict,
     k_el_per_hr: float = 0.0,
+    D_eff_override: float | None = None,
 ) -> dict:
     """Run the forward-Euler solver for one parameter combination.
 
     Args:
         R_um: tumor radius (um).
-        d_NP_nm: nanoparticle diameter (nm), sets D_eff(r) via Stokes-Einstein.
+        d_NP_nm: nanoparticle diameter (nm), sets D_eff(r) via Stokes-Einstein
+            (ignored if D_eff_override is given).
         C0_uM: surface drug concentration (uM) at t=0.
-        k_d_per_hr: base drug decay rate (1/hr), scaled per zone.
+        k_d_per_hr: base drug decay rate (1/hr), scaled per zone (always
+            zone-varying, even when D_eff_override is set).
         t_max_hr: simulation duration (hr).
         config: full config dict.
         k_el_per_hr: optional plasma elimination rate (1/hr). When > 0 the
             Dirichlet boundary follows C(R,t) = C0 * exp(-k_el*t) to fold in
             first-order PK decay of the surface concentration; 0 keeps the
             boundary fixed at C0.
+        D_eff_override: if given, use this single spatially-constant
+            diffusivity (um^2/hr) everywhere instead of the zone-resolved
+            D_eff(r) -- used by src/optimize.py's H3 homogeneous-vs-
+            heterogeneous comparison (a homogeneous medium at the arithmetic
+            mean of the three zone D_eff values, with k_d(r) left
+            zone-varying, per the spec's literal "homogeneous diffusion
+            coefficient" comparison).
 
     Returns:
         Dict with radial grid `r` (um), output time grid `t` (hr, length
         N_t_initial), concentration field `C` of shape [N_t, N_r] (uM), the
-        zone-resolved `D_eff` (um^2/hr) and `k_d` (1/hr) fields, and the
+        `D_eff` (um^2/hr) and `k_d` (1/hr) fields actually used, and the
         `n_substeps` used internally per output interval to satisfy CFL.
     """
     fdm_cfg = config["fdm"]
@@ -76,7 +86,10 @@ def solve_fdm(
     r = radial_grid(R_um, N_r, r_min_um)
     dr = r[1] - r[0]
 
-    D_eff = effective_diffusivity(r, d_NP_nm, config)
+    if D_eff_override is None:
+        D_eff = effective_diffusivity(r, d_NP_nm, config)
+    else:
+        D_eff = np.full(N_r, D_eff_override)
     k_d = decay_rate_field(r, k_d_per_hr, config)
     D_eff_max = D_eff.max()
 

@@ -5,8 +5,8 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** Phase 9 (ablation study) complete. See `## Build phases`
-> below — this README will be filled in as each phase lands.
+> **Status:** Phase 10 (optimization + efficiency) complete. See
+> `## Build phases` below — this README will be filled in as each phase lands.
 
 ## What this is
 
@@ -98,7 +98,7 @@ package without touching earlier phases.
 | 7 | Biology module (`src/biology.py`) | done |
 | 8 | Evaluation (`src/evaluate.py`, `scripts/run_evaluation.py`) | done |
 | 9 | Ablation study (`src/ablation.py`, `scripts/run_ablation.py`) | done |
-| 10 | Optimization + efficiency (`src/optimize.py`, `scripts/run_optimization.py`) | pending |
+| 10 | Optimization + efficiency (`src/optimize.py`, `scripts/run_optimization.py`) | done |
 | 11 | Visualization (`src/visualize.py`, `scripts/make_figures.py`) | pending |
 | 12 | Results dashboard (`app/`, `scripts/run_dashboard.py`) | pending |
 | 13 | Polish: full docs, remaining tests, cleanup | pending |
