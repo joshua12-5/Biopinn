@@ -176,6 +176,29 @@ evaluation:
     H6_speedup_orders_of_magnitude: 2.0
 
 # ---------------------------------------------------------------------------
+# Paper asset generation (Phase 14 -- src/results.py, scripts/generate_results.py)
+# Fixed context from the manuscript's Results & Discussion chapter: one
+# baseline parameter set + three standard sweeps, reused across every
+# figure/table so nothing is hard-coded in results.py itself.
+# ---------------------------------------------------------------------------
+paper:
+  baseline:
+    R_um: 400.0
+    d_NP_nm: 100.0
+    C0_uM: 10.0
+    k_d_per_hr: 0.01
+    t_max_hr: 72.0
+  sweeps:
+    d_NP_nm: [10, 50, 100, 150, 200]
+    time_points_hr: [0, 6, 12, 24, 48, 72]
+    radii_um: [200, 300, 400, 500]
+  penetration_threshold_fraction: 0.1   # C >= this fraction of C0 counts as "penetrated" (matches src/evaluate.py)
+  hypotheses:
+    H3_subtherapeutic_zone_increase_pct: 15.0   # heterogeneous sub-therapeutic zone must be >= this much larger
+    H6_max_pinn_time_s: 5.0                     # per-configuration surrogate wall-clock cap
+    H6_speedup_n_combinations: 100              # matches src/optimize.py::speedup_study's spec
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 paths:
@@ -185,4 +208,5 @@ paths:
   artifacts: "artifacts"
   model_checkpoint: "artifacts/biopinn_model.pt"
   normalization_stats: "artifacts/normalization_stats.json"
+  training_history: "artifacts/training_history.json"
   results: "results"          # evaluation/ablation/optimization reports + figures

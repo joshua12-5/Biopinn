@@ -38,3 +38,4 @@ paths:
   processed: "data/processed_dev"
   model_checkpoint: "artifacts/biopinn_model_dev.pt"
   normalization_stats: "artifacts/normalization_stats_dev.json"
+  training_history: "artifacts/training_history_dev.json"

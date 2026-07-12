@@ -5,7 +5,8 @@ drug transport, penetration depth, and tumor-cell viability inside a 3-zone
 tumor spheroid, then uses the trained network as a fast surrogate to
 optimize nanoparticle size and dose.
 
-> **Status:** all 13 build phases complete.
+> **Status:** all 14 build phases complete (0–13 per the original build
+> protocol, plus Phase 14: manuscript Results & Discussion asset generation).
 
 ## What this is
 
@@ -85,7 +86,7 @@ BIOPINN/
 ├── src/                   shared package -- single source of truth for both Colab and local
 ├── scripts/                local CLI entry points (consume artifacts/, never retrain)
 ├── app/                     FastAPI + Plotly results dashboard
-├── results/                 evaluation / ablation / optimization reports + figures (generated)
+├── results/                 evaluation / ablation / optimization / paper reports + figures (generated)
 └── tests/                    unit tests (pytest)
 ```
 
@@ -107,6 +108,7 @@ BIOPINN/
 | `ablation.py` | Trains an identical-architecture `w_phys=0` baseline, compares PDE-residual statistics against the primary model, Wilcoxon signed-rank test (H5). | `run_ablation.py`, dashboard |
 | `optimize.py` | Grid search over `(d_NP, C0)` at 4 tumor radii maximizing volume-averaged kill fraction η; homogeneous-vs-heterogeneous diffusion comparison (H3); PINN-vs-FDM speedup study (H6). | `run_optimization.py`, `make_figures.py`, dashboard |
 | `visualize.py` | Every figure: concentration/viability/cytotoxicity heatmaps, penetration-depth curves, the η(d_NP,C0) surface, the H3 and ablation comparison figures, PDE-residual histogram, PINN-vs-FDM overlay, and a GIF animation. One implementation per figure, shared by `run_evaluation.py` and `make_figures.py`. | `run_evaluation.py`, `make_figures.py` |
+| `results.py` | Computes the manuscript's Results & Discussion chapter: Fig 4.1–4.10 and Table 4.1–4.9, at the manuscript's fixed baseline (R=400μm, d_NP=100nm, C0=10μM, k_d=0.01/hr, t=72hr) and its three standard sweeps. Calls into the modules above for every number; never reimplements physics. | `generate_results.py` |
 
 ### `scripts/` — local CLI entry points (consume `artifacts/`, never retrain)
 
@@ -117,6 +119,7 @@ BIOPINN/
 | `run_optimization.py` | Per-radius `(d_NP*, C0*)` + max η, the homogeneous-vs-heterogeneous comparison (H3), and the PINN-vs-FDM speedup study (H6) → `results/optimization/optimization_report.json`. |
 | `make_figures.py` | All publication figures for one representative test simulation + the effectiveness surface + H3 + (if a baseline checkpoint exists) the ablation figure → `results/figures/`. |
 | `run_dashboard.py` | Launches the interactive results dashboard (see below). |
+| `generate_results.py` | The full manuscript Results & Discussion asset pack: Fig 4.1–4.10 (PNG+PDF, 300 DPI) and Table 4.1–4.9 (CSV + one compiled `BIOPINN_results_tables.docx`) → `results/paper/`, plus `results_manifest.json` recording the source/config/key values behind every number. Skips Table 4.8 (ablation) with a clear note if no baseline checkpoint is present. |
 
 ### `app/` — results dashboard
 
@@ -171,10 +174,16 @@ pytest tests/ -v
    python scripts/run_optimization.py        # per-radius (d_NP*, C0*), H3/H6
    python scripts/make_figures.py            # all publication figures -> results/figures/
    python scripts/run_dashboard.py           # interactive dashboard at http://127.0.0.1:8000
+   python scripts/generate_results.py        # manuscript Fig 4.1-4.10 + Table 4.1-4.9 -> results/paper/
    ```
    Pass `--experiment experiment_1` to any of them to point at the small
    dev-scale config instead of `configs/default_config.yaml` (useful for a
-   fast smoke test with a dev-trained checkpoint).
+   fast smoke test with a dev-trained checkpoint). `generate_results.py`
+   additionally needs `artifacts/training_history.json` (saved directly by
+   the notebook's training-artifacts cell) for the loss-curve figure, and a
+   `<model_checkpoint>_baseline.pt` (from `run_ablation.py`) to include the
+   ablation table -- it runs and produces the other 9 tables + 10 figures
+   without either.
 
 ## Configuration system
 
@@ -212,7 +221,14 @@ doses the whole tumor equilibrates within the simulation window and there's
 no contrast left to detect. This is a property of the underlying physical
 model at those parameters, not an implementation bug; see the docstrings in
 `tests/test_optimize.py` and `tests/test_biology.py` for the specific
-regimes and the reasoning.)*
+regimes and the reasoning. `generate_results.py`'s Table 4.6/Fig 4.9 and
+Hypothesis H3 compute this honestly at the manuscript's own literal
+baseline (C0=10μM) rather than substituting a different, contrast-showing
+regime — so a real trained model may legitimately report H3 as "not
+supported" in `results/paper/`, alongside a manifest note explaining why;
+that is the correct, non-cherry-picked output of replacing a manuscript's
+illustrative `[SAMPLE]` figures with a real computation, not a bug in the
+pipeline.)*
 
 ## Testing
 

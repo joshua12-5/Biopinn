@@ -15,6 +15,7 @@ MODULES = [
     "src.ablation",
     "src.optimize",
     "src.visualize",
+    "src.results",
     "app.server",
 ]
 
