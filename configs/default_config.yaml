@@ -1,0 +1,212 @@
+# BIOPINN — default configuration
+# Single source of truth for physical constants, dataset spec, architecture,
+# loss weights, and training schedule. All src/ modules read from this file
+# (via src/config.py) rather than hard-coding numbers, so experiment_*.yaml
+# files only need to override the fields they change.
+
+experiment_name: "biopinn_default"
+seed: 42
+
+# ---------------------------------------------------------------------------
+# Physical constants
+# ---------------------------------------------------------------------------
+constants:
+  T: 310.0                 # K, physiological temperature
+  eta: 1.2e-3               # Pa*s, dynamic viscosity of interstitial fluid
+  k_B: 1.380649e-23         # J/K, Boltzmann constant
+
+# ---------------------------------------------------------------------------
+# Three-zone tumor microenvironment
+# ---------------------------------------------------------------------------
+microenvironment:
+  zones: ["proliferating_rim", "quiescent_zone", "necrotic_core"]
+  f_zone:                  # D_eff = f_zone * D_free
+    proliferating_rim: 0.20
+    quiescent_zone: 0.35
+    necrotic_core: 0.50
+  k_d_multiplier:
+    proliferating_rim: 1.5
+    quiescent_zone: 0.8
+    necrotic_core: 0.3
+  oxygen:
+    D_oxygen_um2_per_hr: 2000.0       # um^2/hr, O2 diffusivity in tissue
+    consumption_rate_per_hr: 1.0      # k_O2, 1/hr (tuned so R=100um tumors stay
+                                        # normoxic while R=400-500um develop a
+                                        # full rim/quiescent/necrotic structure)
+    surface_o2_percent: 8.0            # O2 at r=R, % saturation (normoxic culture)
+    hypoxia_threshold_percent: 1.0     # boundary: proliferating -> quiescent
+    necrotic_threshold_percent: 0.1    # boundary: quiescent -> necrotic
+
+# ---------------------------------------------------------------------------
+# Governing PDE / FDM solver
+# ---------------------------------------------------------------------------
+fdm:
+  N_r: 200                 # radial grid points
+  N_t_initial: 1000        # initial number of time steps (refined by CFL)
+  cfl_limit: 0.5            # CFL = D_eff_max * dt / dr^2 must be < this
+  cfl_safety_factor: 0.4    # dt_safe = cfl_safety_factor * dr^2 / D_eff_max
+  r_min_um: 0.001           # um, avoid singularity at r=0
+
+# ---------------------------------------------------------------------------
+# Synthetic dataset (LHS over 5D parameter space)
+# ---------------------------------------------------------------------------
+dataset:
+  n_simulations: 2000
+  split:
+    train: 1400
+    val: 300
+    test: 300
+  parameter_ranges:
+    R_um: [100, 500]           # tumor radius, um
+    d_NP_nm: [10, 200]         # nanoparticle diameter, nm
+    C0_uM: [0.1, 20]           # initial/surface drug concentration, uM
+    k_d_per_hr: [0.005, 0.05]  # drug decay rate, 1/hr
+    t_max_hr: [24, 72]         # simulation duration, hr
+  points_per_sim:
+    data: 3000                 # interior FDM-labeled points -> L_data
+    collocation: 7500           # PDE residual points -> L_phys (5000-10000)
+    bc_surface: 500              # Dirichlet BC points -> L_bc
+    bc_center: 500                # Neumann symmetry points -> L_neu
+    ic: 500                        # t=0 points -> L_ic
+
+# ---------------------------------------------------------------------------
+# Pharmacodynamics / biology
+# ---------------------------------------------------------------------------
+biology:
+  IC50_uM: 1.0
+  n_hill: 2.0
+  delta_max_per_day: 2.0     # converted to /hr internally (delta_max / 24)
+  k_p_per_hr: 0.05            # logistic growth rate, range 0.03-0.1
+  N_max: 1.0
+  penetration_cytotoxicity_threshold: 0.5
+  h4_time_hr: 72.0
+  h4_rim_viability_max: 20.0   # percent
+  h4_core_viability_min: 60.0  # percent
+
+# ---------------------------------------------------------------------------
+# PINN architecture
+# ---------------------------------------------------------------------------
+model:
+  # Parametric surrogate: (r_norm, t_norm, R_norm, d_NP_norm, C0_norm,
+  # k_d_norm, t_max_norm), matching src/data_pipeline.py's 7-column point
+  # tensor layout (see PARAM_ORDER there). This extends the base "(r_norm,
+  # t_norm) dim 2" skeleton so one trained model generalizes across the 5D
+  # parameter space -- required for Phase 10's optimization surrogate to
+  # query arbitrary (d_NP, C0, R) combinations without retraining.
+  input_dim: 7
+  output_dim: 1               # C_norm
+  n_layers: 5
+  n_neurons: 64
+  activation: "tanh"
+  init: "xavier_normal"
+  hard_ic_transform: true      # C_NN = sigmoid(f_theta(x)) * t_norm
+  fourier_features:
+    enabled: false             # optional random Fourier feature encoding
+    n_features: 32
+    sigma: 1.0
+
+# ---------------------------------------------------------------------------
+# Composite loss weights
+# ---------------------------------------------------------------------------
+loss:
+  w_data: 1.0
+  w_phys: 1.0
+  w_bc: 10.0
+  w_neu: 10.0
+  w_ic: 10.0
+  w_phys_ramp:                 # troubleshooting safeguard: ramp w_phys if NaN
+    enabled: false
+    start: 0.001
+    end: 1.0
+    ramp_steps: 5000
+
+# ---------------------------------------------------------------------------
+# Training schedule (two-phase Adam -> L-BFGS)
+# ---------------------------------------------------------------------------
+training:
+  adam:
+    iters: 20000
+    lr: 1.0e-3
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    step_lr_gamma: 0.9
+    step_lr_step_size: 1000
+    grad_clip_norm: 1.0
+  lbfgs:
+    iters: 5000
+    history_size: 50
+    line_search_fn: "strong_wolfe"
+    tolerance_grad: 1.0e-9
+    tolerance_change: 1.0e-11
+  convergence:
+    phys_val_threshold: 1.0e-4
+    data_val_threshold: 0.01    # uM^2
+    patience_epochs: 200
+  nan_recovery:
+    fallback_lr: 1.0e-4
+    ramp_w_phys: true
+
+# ---------------------------------------------------------------------------
+# Optimization engine (surrogate grid search)
+# ---------------------------------------------------------------------------
+optimization:
+  radii_um: [200, 300, 400, 500]
+  d_NP_grid_nm: [10, 200]       # range; discretized into ~9 points -> ~63 combos with C0 grid
+  C0_grid_uM: [0.1, 20]
+  n_d_NP_points: 9
+  n_C0_points: 7
+  speedup_study:
+    n_combinations: 100
+
+# ---------------------------------------------------------------------------
+# Evaluation thresholds (publication-quality acceptance criteria)
+# ---------------------------------------------------------------------------
+evaluation:
+  thresholds:
+    rmse_uM: 0.10
+    mae_uM: 0.05
+    r2: 0.990
+    l2_relative_error: 0.01
+    mean_pde_residual: 1.0e-4
+    penetration_rmse_um: 5.0
+  hypotheses:
+    H1_rmse_target_uM: 0.05
+    H2_penetration_diff_um: 100.0
+    H5_residual_improvement_factor: 10.0
+    H6_speedup_orders_of_magnitude: 2.0
+
+# ---------------------------------------------------------------------------
+# Paper asset generation (Phase 14 -- src/results.py, scripts/generate_results.py)
+# Fixed context from the manuscript's Results & Discussion chapter: one
+# baseline parameter set + three standard sweeps, reused across every
+# figure/table so nothing is hard-coded in results.py itself.
+# ---------------------------------------------------------------------------
+paper:
+  baseline:
+    R_um: 400.0
+    d_NP_nm: 100.0
+    C0_uM: 10.0
+    k_d_per_hr: 0.01
+    t_max_hr: 72.0
+  sweeps:
+    d_NP_nm: [10, 50, 100, 150, 200]
+    time_points_hr: [0, 6, 12, 24, 48, 72]
+    radii_um: [200, 300, 400, 500]
+  penetration_threshold_fraction: 0.1   # C >= this fraction of C0 counts as "penetrated" (matches src/evaluate.py)
+  hypotheses:
+    H3_subtherapeutic_zone_increase_pct: 15.0   # heterogeneous sub-therapeutic zone must be >= this much larger
+    H6_max_pinn_time_s: 5.0                     # per-configuration surrogate wall-clock cap
+    H6_speedup_n_combinations: 100              # matches src/optimize.py::speedup_study's spec
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  raw_simulations: "data/raw_simulations"
+  processed: "data/processed"
+  viability_maps: "data/viability_maps"
+  artifacts: "artifacts"
+  model_checkpoint: "artifacts/biopinn_model.pt"
+  normalization_stats: "artifacts/normalization_stats.json"
+  training_history: "artifacts/training_history.json"
+  results: "results"          # evaluation/ablation/optimization reports + figures

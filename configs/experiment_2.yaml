@@ -1,0 +1,17 @@
+# Experiment 2 — ablation study baseline.
+# Same architecture and dataset as default_config.yaml, but with the physics
+# loss switched off (w_phys=0) so src/ablation.py can train an "unconstrained"
+# baseline and compare PDE-residual statistics against full BIOPINN (H5).
+
+experiment_name: "biopinn_experiment_2_ablation_baseline"
+
+loss:
+  w_data: 1.0
+  w_phys: 0.0
+  w_bc: 10.0
+  w_neu: 10.0
+  w_ic: 10.0
+
+paths:
+  model_checkpoint: "artifacts/biopinn_baseline_model.pt"
+  normalization_stats: "artifacts/normalization_stats.json"
