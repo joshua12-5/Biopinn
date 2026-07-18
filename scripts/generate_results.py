@@ -287,9 +287,10 @@ def main() -> None:
     doc = Document()
     doc.add_heading("BIOPINN — Results & Discussion: Tables", level=1)
     doc.add_paragraph(
-        "Every value in this document was computed from the trained checkpoint, the held-out "
-        "300-simulation test set, and the analysis routines in src/ -- see results_manifest.json "
-        "in this folder for the exact source and configuration behind every number."
+        f"Every value in this document was computed from the trained checkpoint, the held-out "
+        f"{len(sims)}-simulation test set, and the analysis routines in src/ -- see "
+        f"results_manifest.json in this folder for the exact source and configuration behind "
+        f"every number."
     )
 
     order = [

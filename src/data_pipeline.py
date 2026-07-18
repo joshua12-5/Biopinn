@@ -66,8 +66,8 @@ def generate_dataset(n_simulations: int, config: dict, seed: int | None, n_jobs:
         n_jobs: number of worker processes for parallel FDM solving. 1 (the
             default) solves sequentially in-process. > 1 uses a
             ProcessPoolExecutor -- each simulation is independent, so this
-            scales close to linearly with core count. The full 2000-sim
-            production dataset takes ~3 hours single-threaded (some
+            scales close to linearly with core count. The full 10,000-sim
+            production dataset takes ~15 hours single-threaded (some
             LHS-sampled small-R/small-d_NP combinations need heavy CFL
             sub-stepping, see src/fdm_solver.py); pass n_jobs=os.cpu_count()
             on Colab to cut that down substantially.

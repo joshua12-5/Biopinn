@@ -8,7 +8,7 @@ def test_default_config_loads():
     assert config["model"]["n_layers"] == 5
     assert config["model"]["n_neurons"] == 64
     assert config["loss"]["w_bc"] == 10.0
-    assert config["dataset"]["n_simulations"] == 2000
+    assert config["dataset"]["n_simulations"] == 10000
 
 
 def test_experiment_override_merges():
