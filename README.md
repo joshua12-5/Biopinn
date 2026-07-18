@@ -154,7 +154,9 @@ export. Never retrains.
 ## Setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate        # Windows (PowerShell): .venv\Scripts\Activate.ps1
+                                  # Windows (cmd.exe):    .venv\Scripts\activate.bat
 pip install -e .
 pip install -r requirements.txt
 ```
@@ -164,6 +166,20 @@ Verify the scaffold:
 ```bash
 pytest tests/ -v
 ```
+
+Tested on Linux, macOS, and Windows 10/11 (PowerShell and cmd.exe). Every
+path in `src/`/`scripts/`/`app/` is built with `pathlib`, so nothing
+hard-codes a POSIX-only path separator. Two Windows-specific notes:
+
+- **PowerShell's script execution policy** may block `Activate.ps1` the
+  first time, with an error like "running scripts is disabled on this
+  system." Fix once per machine (as an administrator, or per-user):
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+- **`pip install torch`** installs the CPU-only build by default on every
+  platform, Windows included. If this machine has an NVIDIA GPU, install a
+  CUDA build instead — `notebooks/biopinn_train.ipynb`'s GPU-detection cell
+  prints the exact command for your setup, or see
+  [pytorch.org/get-started](https://pytorch.org/get-started/locally/).
 
 ## Full round trip
 

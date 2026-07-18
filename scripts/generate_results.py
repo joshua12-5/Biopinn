@@ -104,7 +104,7 @@ def main() -> None:
 
     print(f"Loading checkpoint: {checkpoint_path}")
     model = load_checkpoint(str(checkpoint_path), config)
-    with open(resolve_path(config, "normalization_stats")) as f:
+    with open(resolve_path(config, "normalization_stats"), encoding="utf-8") as f:
         norm_stats = json.load(f)
 
     baseline_checkpoint_path = checkpoint_path.with_name(checkpoint_path.stem + "_baseline" + checkpoint_path.suffix)
@@ -217,7 +217,7 @@ def main() -> None:
         if result is None:
             continue
         df, meta = result
-        df.to_csv(output_dir / f"table_4_{number.split('.')[1]}.csv", index=False)
+        df.to_csv(output_dir / f"table_4_{number.split('.')[1]}.csv", index=False, encoding="utf-8")
         manifest["tables"][number] = {"csv": str(output_dir / f"table_4_{number.split('.')[1]}.csv"), **meta}
 
     # ----------------------------------------------------------------- #
@@ -277,7 +277,7 @@ def main() -> None:
         },
     }
     table_4_9 = R.table_4_9_hypothesis_summary(hypotheses)
-    table_4_9.to_csv(output_dir / "table_4_9.csv", index=False)
+    table_4_9.to_csv(output_dir / "table_4_9.csv", index=False, encoding="utf-8")
     manifest["tables"]["4.9"] = {"csv": str(output_dir / "table_4_9.csv"), "hypotheses": hypotheses}
 
     # ----------------------------------------------------------------- #
@@ -323,7 +323,7 @@ def main() -> None:
     # Manifest
     # ----------------------------------------------------------------- #
     manifest_path = output_dir / "results_manifest.json"
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(_sanitize_for_json(manifest), f, indent=2)
     print(f"\nSaved 10 figures (PNG+PDF), 9 tables (CSV), the compiled docx, and results_manifest.json to {output_dir}")
 

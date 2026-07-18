@@ -143,7 +143,7 @@ def test_save_and_load_checkpoint_round_trip(tmp_path):
         assert artifacts["checkpoint_path"].exists()
         assert artifacts["normalization_stats_path"].exists()
 
-        with open(artifacts["normalization_stats_path"]) as f:
+        with open(artifacts["normalization_stats_path"], encoding="utf-8") as f:
             stats_on_disk = json.load(f)
         assert stats_on_disk == result["stats"]
 

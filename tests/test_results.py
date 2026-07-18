@@ -103,7 +103,7 @@ def test_load_training_history_prefers_dedicated_file(tmp_path):
         cfg_module.REPO_ROOT = tmp_path
         (tmp_path / "artifacts").mkdir(parents=True)
         history_data = {"total": [1.0, 0.5]}
-        with open(tmp_path / "artifacts" / "training_history.json", "w") as f:
+        with open(tmp_path / "artifacts" / "training_history.json", "w", encoding="utf-8") as f:
             json.dump(history_data, f)
 
         loaded = R.load_training_history(config)
@@ -124,7 +124,7 @@ def test_load_training_history_falls_back_to_training_run_json(tmp_path):
     try:
         cfg_module.REPO_ROOT = tmp_path
         (tmp_path / "artifacts").mkdir(parents=True)
-        with open(tmp_path / "artifacts" / "training_run.json", "w") as f:
+        with open(tmp_path / "artifacts" / "training_run.json", "w", encoding="utf-8") as f:
             json.dump({"history": {"total": [2.0, 1.0]}, "config": {}}, f)
 
         loaded = R.load_training_history(config)

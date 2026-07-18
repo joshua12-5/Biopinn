@@ -217,7 +217,7 @@ def load_processed_dataset(config: dict) -> dict:
         with np.load(processed_dir / f"{split_name}.npz") as data:
             splits[split_name] = {key: data[key] for key in data.files}
 
-    with open(processed_dir / "normalization_stats.json") as f:
+    with open(processed_dir / "normalization_stats.json", encoding="utf-8") as f:
         stats = json.load(f)
 
     return {"splits": splits, "stats": stats}
@@ -239,7 +239,7 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
     for split_name, tensors in splits.items():
         np.savez_compressed(processed_dir / f"{split_name}.npz", **tensors)
 
-    with open(processed_dir / "normalization_stats.json", "w") as f:
+    with open(processed_dir / "normalization_stats.json", "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
     if sims_by_split is not None:
@@ -247,7 +247,7 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
             split_name: [{k: (float(sim[k]) if k != "sim_id" else int(sim[k])) for k in ("sim_id",) + PARAM_ORDER} for sim in sims]
             for split_name, sims in sims_by_split.items()
         }
-        with open(processed_dir / "sim_params.json", "w") as f:
+        with open(processed_dir / "sim_params.json", "w", encoding="utf-8") as f:
             json.dump(sim_params, f, indent=2)
 
 

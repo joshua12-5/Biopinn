@@ -44,7 +44,7 @@ THRESHOLD_UNITS = {
 
 def _load_normalization_stats(config: dict) -> dict:
     stats_path = resolve_path(config, "normalization_stats")
-    with open(stats_path) as f:
+    with open(stats_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -98,12 +98,12 @@ def save_metrics(report: dict, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     exportable = {k: v for k, v in report.items() if k != "residual_histogram"}
-    with open(output_dir / "metrics.json", "w") as f:
+    with open(output_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(exportable, f, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o))
 
     g = report["metrics"]["global"]
     pf = report["threshold_pass_fail"]
-    with open(output_dir / "metrics.csv", "w", newline="") as f:
+    with open(output_dir / "metrics.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["metric", "value", "unit", "pass"])
         for key in ("rmse", "mae", "r2", "l2_relative", "mean_pde_residual", "penetration_rmse_um"):

@@ -1,0 +1,23 @@
+# Normalize line endings on checkout/commit so Git doesn't warn about (or
+# silently rewrite) CRLF vs. LF -- most relevant for Windows contributors,
+# since this repo was originally developed on Linux.
+* text=auto
+
+# Keep these strictly LF regardless of platform: scripts with a shebang
+# line, and files where mixed line endings would be visually noisy in diffs.
+*.py text eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Treat notebooks as text for diffing, but let Git pick the native line
+# ending on checkout (nbformat/JSON tooling doesn't care either way).
+*.ipynb text
+
+# Binary assets -- never run line-ending conversion on these.
+*.png binary
+*.pdf binary
+*.gif binary
+*.pt binary
+*.npz binary
+*.docx binary

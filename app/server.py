@@ -93,7 +93,7 @@ def _startup() -> None:
 
         model = load_checkpoint(str(checkpoint_path), config)
         stats_path = resolve_path(config, "normalization_stats")
-        with open(stats_path) as f:
+        with open(stats_path, encoding="utf-8") as f:
             norm_stats = json.load(f)
 
         state.config = config

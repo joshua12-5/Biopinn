@@ -100,7 +100,7 @@ def load_test_sim_params(config: dict) -> list[dict]:
     """Load the exact 5-tuples used for the test split, as saved by
     src.data_pipeline.build_dataset alongside the processed .npz files."""
     processed_dir = resolve_path(config, "processed")
-    with open(processed_dir / "sim_params.json") as f:
+    with open(processed_dir / "sim_params.json", encoding="utf-8") as f:
         sim_params = json.load(f)
     return sim_params["test"]
 

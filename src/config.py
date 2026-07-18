@@ -40,7 +40,7 @@ def load_config(experiment: str | Path | None = None) -> dict[str, Any]:
     Returns:
         A merged config dict.
     """
-    with open(DEFAULT_CONFIG_PATH) as f:
+    with open(DEFAULT_CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     if experiment is None:
@@ -56,7 +56,7 @@ def load_config(experiment: str | Path | None = None) -> dict[str, Any]:
     if not experiment_path.exists():
         raise FileNotFoundError(f"Experiment config not found: {experiment}")
 
-    with open(experiment_path) as f:
+    with open(experiment_path, encoding="utf-8") as f:
         override = yaml.safe_load(f) or {}
 
     return _deep_merge(config, override)

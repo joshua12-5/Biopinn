@@ -174,7 +174,7 @@ def test_build_dataset_end_to_end_small(tmp_path):
         stats_path = processed_dir / "normalization_stats.json"
         assert stats_path.exists()
 
-        with open(stats_path) as f:
+        with open(stats_path, encoding="utf-8") as f:
             stats_on_disk = json.load(f)
         assert set(stats_on_disk.keys()) == set(PARAM_ORDER)
 
@@ -184,7 +184,7 @@ def test_build_dataset_end_to_end_small(tmp_path):
 
         sim_params_path = processed_dir / "sim_params.json"
         assert sim_params_path.exists()
-        with open(sim_params_path) as f:
+        with open(sim_params_path, encoding="utf-8") as f:
             sim_params = json.load(f)
         assert set(sim_params.keys()) == {"train", "val", "test"}
         assert len(sim_params["test"]) == split_cfg["test"]
