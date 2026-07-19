@@ -33,12 +33,17 @@ def test_resolve_path_joins_relative_paths_under_repo_root():
     assert resolved.is_absolute()
 
 
-def test_resolve_path_lets_an_absolute_override_win():
+def test_resolve_path_lets_an_absolute_override_win(tmp_path):
     # pathlib's / operator discards the left operand when the right is
     # absolute -- this is exactly what notebooks/biopinn_train.ipynb relies
     # on to redirect paths.* at a Google Drive mount without any special
-    # casing in resolve_path itself.
+    # casing in resolve_path itself. Use pytest's tmp_path (a real,
+    # platform-appropriate absolute path) rather than a hardcoded POSIX
+    # literal like "/absolute/..." -- on Windows, a leading "/" is
+    # drive-relative rather than truly absolute, so pathlib normalizes it
+    # to "C:\...", which isn't what this test is actually checking.
     config = load_config()
-    config["paths"]["model_checkpoint"] = "/absolute/drive/path/biopinn_model.pt"
+    absolute_override = tmp_path / "drive" / "path" / "biopinn_model.pt"
+    config["paths"]["model_checkpoint"] = str(absolute_override)
     resolved = resolve_path(config, "model_checkpoint")
-    assert str(resolved) == "/absolute/drive/path/biopinn_model.pt"
+    assert resolved == absolute_override
