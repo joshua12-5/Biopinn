@@ -72,6 +72,10 @@ either way, with no manual edits:
   the CPU-only build, the notebook prints the exact `pip install` command
   to switch to a CUDA build.
 
+If you know you're only ever running locally, `notebooks/biopinn_train_local.ipynb`
+is the same notebook with all the Colab-detection branching removed —
+simpler to read, identical behavior to the local path above.
+
 ```
 notebooks/biopinn_train.ipynb   [Colab or local GPU]   data generation + training
         │  saves biopinn_model.pt + normalization_stats.json
