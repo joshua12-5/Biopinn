@@ -76,6 +76,25 @@ If you know you're only ever running locally, `notebooks/biopinn_train_local.ipy
 is the same notebook with all the Colab-detection branching removed —
 simpler to read, identical behavior to the local path above.
 
+**Windows + data generation:** both notebooks' "generate the dataset" cell always
+runs single-threaded on Windows, even with multiple CPU cores available. This is
+deliberate — Windows' multiprocessing re-imports the Jupyter kernel launcher as
+`__main__` in each worker process, which fails to bootstrap and crashes with
+`BrokenProcessPool` if you try to parallelize `ProcessPoolExecutor` work directly
+from a notebook cell. For real multi-core speed on Windows (or anywhere), run
+generation as a standalone script instead, which parallelizes safely because it has
+a real `if __name__ == "__main__":` guard:
+
+```
+python scripts/generate_dataset.py --experiment experiment_1 --n-jobs 8
+```
+
+Then open the training notebook, set `DATA_ALREADY_GENERATED = True` next to
+`QUICK_TEST`, and run the rest of the notebook — it loads this script's output via
+`load_processed_dataset()` instead of regenerating it. Omit `--experiment` to
+generate the full 10,000-sim production dataset; `--n-jobs` defaults to all CPU
+cores.
+
 ```
 notebooks/biopinn_train.ipynb   [Colab or local GPU]   data generation + training
         │  saves biopinn_model.pt + normalization_stats.json
