@@ -52,20 +52,55 @@ hard-coding numbers.
 
 ## Two-part execution split
 
-Heavy compute (synthetic dataset generation + PINN training) runs on
-**Google Colab** (free T4 GPU, ~1400-2000 FDM simulations + a 20k-iteration
-Adam phase + an L-BFGS phase — impractical on a laptop CPU). Everything
-else — biology maps, evaluation, ablation, optimization, visualization, and
-the results dashboard — runs **locally on CPU**, consuming the trained
-artifacts. The `src/` package is the single source of truth, imported
-unchanged by both sides, so there is no duplicated physics or model logic.
+Heavy compute (synthetic dataset generation + PINN training) is meant to run
+on a GPU (10,000 FDM simulations + a 20k-iteration Adam phase + an
+L-BFGS phase — impractical on a CPU-only laptop). Everything else — biology
+maps, evaluation, ablation, optimization, visualization, and the results
+dashboard — runs **locally on CPU**, consuming the trained artifacts. The
+`src/` package is the single source of truth, imported unchanged
+everywhere, so there is no duplicated physics or model logic.
+
+`notebooks/biopinn_train.ipynb` auto-detects its environment and runs
+either way, with no manual edits:
+
+- **Google Colab** (free T4 GPU): clones the repo, installs dependencies,
+  mounts Google Drive, and redirects every output path there so it survives
+  the runtime being recycled.
+- **A local Jupyter kernel** (e.g. with your own NVIDIA GPU): skips the
+  clone/Drive steps and writes directly into this checkout's own
+  `artifacts/` and `data/` folders. If PyTorch reports no GPU because it's
+  the CPU-only build, the notebook prints the exact `pip install` command
+  to switch to a CUDA build.
+
+If you know you're only ever running locally, `notebooks/biopinn_train_local.ipynb`
+is the same notebook with all the Colab-detection branching removed —
+simpler to read, identical behavior to the local path above.
+
+**Windows + data generation:** both notebooks' "generate the dataset" cell always
+runs single-threaded on Windows, even with multiple CPU cores available. This is
+deliberate — Windows' multiprocessing re-imports the Jupyter kernel launcher as
+`__main__` in each worker process, which fails to bootstrap and crashes with
+`BrokenProcessPool` if you try to parallelize `ProcessPoolExecutor` work directly
+from a notebook cell. For real multi-core speed on Windows (or anywhere), run
+generation as a standalone script instead, which parallelizes safely because it has
+a real `if __name__ == "__main__":` guard:
 
 ```
-notebooks/biopinn_train.ipynb   [Colab, GPU]   data generation + training
-        │  saves biopinn_model.pt + normalization_stats.json to Drive
+python scripts/generate_dataset.py --experiment experiment_1 --n-jobs 8
+```
+
+Then open the training notebook, set `DATA_ALREADY_GENERATED = True` next to
+`QUICK_TEST`, and run the rest of the notebook — it loads this script's output via
+`load_processed_dataset()` instead of regenerating it. Omit `--experiment` to
+generate the full 10,000-sim production dataset; `--n-jobs` defaults to all CPU
+cores.
+
+```
+notebooks/biopinn_train.ipynb   [Colab or local GPU]   data generation + training
+        │  saves biopinn_model.pt + normalization_stats.json
         ▼
-artifacts/                      [Local, CPU]   drop the downloaded files here
-        │
+artifacts/                      [Local, CPU]   (already there if trained locally;
+        │                                       drop the downloaded files here if trained on Colab)
         ▼
 scripts/run_evaluation.py, run_ablation.py, run_optimization.py,
 make_figures.py, run_dashboard.py
@@ -142,7 +177,9 @@ export. Never retrains.
 ## Setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate        # Windows (PowerShell): .venv\Scripts\Activate.ps1
+                                  # Windows (cmd.exe):    .venv\Scripts\activate.bat
 pip install -e .
 pip install -r requirements.txt
 ```
@@ -153,19 +190,44 @@ Verify the scaffold:
 pytest tests/ -v
 ```
 
+Tested on Linux, macOS, and Windows 10/11 (PowerShell and cmd.exe). Every
+path in `src/`/`scripts/`/`app/` is built with `pathlib`, so nothing
+hard-codes a POSIX-only path separator. Two Windows-specific notes:
+
+- **PowerShell's script execution policy** may block `Activate.ps1` the
+  first time, with an error like "running scripts is disabled on this
+  system." Fix once per machine (as an administrator, or per-user):
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+- **`pip install torch`** installs the CPU-only build by default on every
+  platform, Windows included. If this machine has an NVIDIA GPU, install a
+  CUDA build instead — `notebooks/biopinn_train.ipynb`'s GPU-detection cell
+  prints the exact command for your setup, or see
+  [pytorch.org/get-started](https://pytorch.org/get-started/locally/).
+
 ## Full round trip
 
-1. **Run the notebook on Colab** (`notebooks/biopinn_train.ipynb`): open it
-   in Colab, select a T4 GPU runtime, and run all cells top to bottom. It
-   installs dependencies, mounts your Google Drive, clones/installs `src/`,
-   generates the 2,000-simulation LHS-sampled FDM dataset (CFL-enforced),
-   runs two-phase Adam → L-BFGS training with logged loss curves, and saves
-   `biopinn_model.pt`, `normalization_stats.json`, and the processed
-   train/val/test dataset (+ `sim_params.json`) to Drive. A `QUICK_TEST`
-   toggle near the top switches to a tiny dev-scale run for smoke-testing
-   the notebook itself.
-2. **Download the artifacts** from Drive into this repo:
-   - `biopinn_model.pt`, `normalization_stats.json` → `artifacts/`
+1. **Run the training notebook** (`notebooks/biopinn_train.ipynb`), either:
+   - **On Colab** (no local GPU needed): open it in Colab, select a T4 GPU
+     runtime, and run all cells top to bottom. It installs dependencies,
+     mounts your Google Drive, clones/installs `src/`, and saves everything
+     there.
+   - **Locally** (if this machine has an NVIDIA GPU): open it in a local
+     Jupyter kernel from inside `notebooks/` and run all cells — it
+     auto-detects it isn't on Colab, skips the clone/Drive steps, and
+     writes straight into this checkout's `artifacts/`/`data/` folders.
+     Make sure PyTorch can see the GPU first (`torch.cuda.is_available()`
+     in cell 5 — if it's `False` because you have the CPU-only build, the
+     notebook prints the exact command to reinstall the CUDA build).
+
+   Either way, it generates the 10,000-simulation LHS-sampled FDM dataset
+   (CFL-enforced), runs two-phase Adam → L-BFGS training with logged loss
+   curves, and saves `biopinn_model.pt`, `normalization_stats.json`,
+   `training_history.json`, and the processed train/val/test dataset (+
+   `sim_params.json`). A `QUICK_TEST` toggle near the top switches to a
+   tiny dev-scale run for smoke-testing the notebook itself.
+2. **If you trained on Colab**, download the artifacts from Drive into this
+   repo (skip this step if you trained locally — they're already there):
+   - `biopinn_model.pt`, `normalization_stats.json`, `training_history.json` → `artifacts/`
    - the processed dataset → `data/processed/`
 3. **Run local analysis** (any order; all consume `artifacts/` + `data/processed/`, none retrain):
    ```bash

@@ -105,7 +105,7 @@ def save_report(radius_results: dict, h3_result: dict, speedup_result: dict, out
         "H3": h3_result,
         "H6": speedup_result,
     }
-    with open(output_dir / "optimization_report.json", "w") as f:
+    with open(output_dir / "optimization_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=default)
     print(f"\nSaved optimization_report.json to {output_dir}")
 
@@ -128,7 +128,7 @@ def main() -> None:
     model = load_checkpoint(str(checkpoint_path), config)
 
     stats_path = resolve_path(config, "normalization_stats")
-    with open(stats_path) as f:
+    with open(stats_path, encoding="utf-8") as f:
         norm_stats = json.load(f)
 
     print("Running grid search across tumor radii (200/300/400/500 um)...")

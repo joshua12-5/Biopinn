@@ -66,8 +66,8 @@ def generate_dataset(n_simulations: int, config: dict, seed: int | None, n_jobs:
         n_jobs: number of worker processes for parallel FDM solving. 1 (the
             default) solves sequentially in-process. > 1 uses a
             ProcessPoolExecutor -- each simulation is independent, so this
-            scales close to linearly with core count. The full 2000-sim
-            production dataset takes ~3 hours single-threaded (some
+            scales close to linearly with core count. The full 10,000-sim
+            production dataset takes ~15 hours single-threaded (some
             LHS-sampled small-R/small-d_NP combinations need heavy CFL
             sub-stepping, see src/fdm_solver.py); pass n_jobs=os.cpu_count()
             on Colab to cut that down substantially.
@@ -217,7 +217,7 @@ def load_processed_dataset(config: dict) -> dict:
         with np.load(processed_dir / f"{split_name}.npz") as data:
             splits[split_name] = {key: data[key] for key in data.files}
 
-    with open(processed_dir / "normalization_stats.json") as f:
+    with open(processed_dir / "normalization_stats.json", encoding="utf-8") as f:
         stats = json.load(f)
 
     return {"splits": splits, "stats": stats}
@@ -239,7 +239,7 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
     for split_name, tensors in splits.items():
         np.savez_compressed(processed_dir / f"{split_name}.npz", **tensors)
 
-    with open(processed_dir / "normalization_stats.json", "w") as f:
+    with open(processed_dir / "normalization_stats.json", "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
     if sims_by_split is not None:
@@ -247,7 +247,7 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
             split_name: [{k: (float(sim[k]) if k != "sim_id" else int(sim[k])) for k in ("sim_id",) + PARAM_ORDER} for sim in sims]
             for split_name, sims in sims_by_split.items()
         }
-        with open(processed_dir / "sim_params.json", "w") as f:
+        with open(processed_dir / "sim_params.json", "w", encoding="utf-8") as f:
             json.dump(sim_params, f, indent=2)
 
 

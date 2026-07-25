@@ -63,7 +63,7 @@ H3_DEMO_PARAMS = {"d_NP_nm": 200.0, "R_um": 500.0, "C0_uM": 0.105, "k_d_per_hr":
 
 def _load_normalization_stats(config: dict) -> dict:
     stats_path = resolve_path(config, "normalization_stats")
-    with open(stats_path) as f:
+    with open(stats_path, encoding="utf-8") as f:
         return json.load(f)
 
 

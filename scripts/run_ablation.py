@@ -68,7 +68,7 @@ def print_report(report: dict) -> None:
 
 def save_report(report: dict, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(output_dir / "ablation_report.json", "w") as f:
+    with open(output_dir / "ablation_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o))
     print(f"\nSaved ablation_report.json to {output_dir}")
 

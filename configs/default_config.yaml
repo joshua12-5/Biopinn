@@ -51,23 +51,28 @@ fdm:
 # Synthetic dataset (LHS over 5D parameter space)
 # ---------------------------------------------------------------------------
 dataset:
-  n_simulations: 2000
+  n_simulations: 10000
   split:
-    train: 1400
-    val: 300
-    test: 300
+    train: 7000
+    val: 1500
+    test: 1500
   parameter_ranges:
     R_um: [100, 500]           # tumor radius, um
     d_NP_nm: [10, 200]         # nanoparticle diameter, nm
     C0_uM: [0.1, 20]           # initial/surface drug concentration, uM
     k_d_per_hr: [0.005, 0.05]  # drug decay rate, 1/hr
     t_max_hr: [24, 72]         # simulation duration, hr
+  # points_per_sim scaled down 5x from the 2000-sim default (3000/7500/500/500/500)
+  # so the total training-batch size (points_per_sim * train sims) -- and thus
+  # full-batch training memory/time, see src/train.py -- stays close to the
+  # already-tested scale even though n_simulations is 5x larger: more distinct
+  # (R, d_NP, C0, k_d, t_max) combinations, not more points per combination.
   points_per_sim:
-    data: 3000                 # interior FDM-labeled points -> L_data
-    collocation: 7500           # PDE residual points -> L_phys (5000-10000)
-    bc_surface: 500              # Dirichlet BC points -> L_bc
-    bc_center: 500                # Neumann symmetry points -> L_neu
-    ic: 500                        # t=0 points -> L_ic
+    data: 600                  # interior FDM-labeled points -> L_data
+    collocation: 1500           # PDE residual points -> L_phys
+    bc_surface: 100              # Dirichlet BC points -> L_bc
+    bc_center: 100                # Neumann symmetry points -> L_neu
+    ic: 100                        # t=0 points -> L_ic
 
 # ---------------------------------------------------------------------------
 # Pharmacodynamics / biology

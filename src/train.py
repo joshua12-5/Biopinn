@@ -217,7 +217,7 @@ def save_checkpoint(model: BIOPINN, config: dict, norm_stats: dict, extra: dict 
 
     stats_path = resolve_path(config, "normalization_stats")
     stats_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(stats_path, "w") as f:
+    with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(norm_stats, f, indent=2)
 
     return {"checkpoint_path": checkpoint_path, "normalization_stats_path": stats_path}

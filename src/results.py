@@ -78,12 +78,12 @@ def load_training_history(config: dict) -> dict:
     """
     history_path = resolve_path(config, "training_history")
     if history_path.exists():
-        with open(history_path) as f:
+        with open(history_path, encoding="utf-8") as f:
             return json.load(f)
 
     run_record_path = resolve_path(config, "artifacts") / "training_run.json"
     if run_record_path.exists():
-        with open(run_record_path) as f:
+        with open(run_record_path, encoding="utf-8") as f:
             return json.load(f)["history"]
 
     raise FileNotFoundError(
