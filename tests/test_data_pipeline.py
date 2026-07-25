@@ -78,17 +78,6 @@ def test_generate_dataset_parallel_matches_sequential():
         np.testing.assert_allclose(a["C"], b["C"])
 
 
-def test_generate_dataset_show_progress_does_not_change_results():
-    sims_plain = generate_dataset(4, FAST_CONFIG, seed=9, n_jobs=1)
-    sims_progress_serial = generate_dataset(4, FAST_CONFIG, seed=9, n_jobs=1, show_progress=True)
-    sims_progress_parallel = generate_dataset(4, FAST_CONFIG, seed=9, n_jobs=2, show_progress=True)
-
-    assert [s["sim_id"] for s in sims_progress_serial] == [s["sim_id"] for s in sims_plain]
-    assert [s["sim_id"] for s in sims_progress_parallel] == [s["sim_id"] for s in sims_plain]
-    for a, b in zip(sims_plain, sims_progress_parallel):
-        np.testing.assert_allclose(a["C"], b["C"])
-
-
 def test_sample_training_points_counts_and_bounds():
     sims = generate_dataset(1, FAST_CONFIG, seed=2)
     sim = sims[0]

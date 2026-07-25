@@ -55,7 +55,7 @@ def main() -> None:
     )
 
     t0 = time.time()
-    dataset = build_dataset(config, seed=args.seed, save=True, n_jobs=n_jobs, show_progress=True)
+    dataset = build_dataset(config, seed=args.seed, save=True, n_jobs=n_jobs)
     elapsed = time.time() - t0
 
     print(f"\nDataset generation complete in {elapsed / 60:.1f} min.")

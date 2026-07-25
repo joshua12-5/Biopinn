@@ -28,7 +28,7 @@ simulation-specific (unconditioned) model is desired instead.
 from __future__ import annotations
 
 import json
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 from scipy.stats import qmc
@@ -59,9 +59,7 @@ def latin_hypercube_sample(n_samples: int, config: dict, seed: int | None) -> np
     return qmc.scale(sample, l_bounds, u_bounds)
 
 
-def generate_dataset(
-    n_simulations: int, config: dict, seed: int | None, n_jobs: int = 1, show_progress: bool = False
-) -> list[dict]:
+def generate_dataset(n_simulations: int, config: dict, seed: int | None, n_jobs: int = 1) -> list[dict]:
     """LHS-sample parameters, solve each with src.fdm_solver.solve_fdm, return raw sims.
 
     Args:
@@ -73,38 +71,14 @@ def generate_dataset(
             LHS-sampled small-R/small-d_NP combinations need heavy CFL
             sub-stepping, see src/fdm_solver.py); pass n_jobs=os.cpu_count()
             on Colab to cut that down substantially.
-        show_progress: display a tqdm progress bar as simulations finish.
-            Uses tqdm.auto so it renders as a notebook widget under Jupyter
-            and a plain terminal bar under a script, falling back to text if
-            ipywidgets isn't installed.
     """
     params = latin_hypercube_sample(n_simulations, config, seed)
-    args_list = [(i, params[i], config) for i in range(n_simulations)]
 
-    progress = None
-    if show_progress:
-        from tqdm.auto import tqdm
-
-        progress = tqdm(total=n_simulations, desc="Solving FDM simulations", unit="sim")
-
-    try:
-        if n_jobs == 1:
-            results = []
-            for args in args_list:
-                results.append(_solve_one(args))
-                if progress is not None:
-                    progress.update(1)
-        else:
-            results = []
-            with ProcessPoolExecutor(max_workers=n_jobs) as pool:
-                futures = [pool.submit(_solve_one, args) for args in args_list]
-                for future in as_completed(futures):
-                    results.append(future.result())
-                    if progress is not None:
-                        progress.update(1)
-    finally:
-        if progress is not None:
-            progress.close()
+    if n_jobs == 1:
+        results = [_solve_one((i, params[i], config)) for i in range(n_simulations)]
+    else:
+        with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+            results = list(pool.map(_solve_one, [(i, params[i], config) for i in range(n_simulations)]))
 
     return sorted(results, key=lambda sim: sim["sim_id"])
 
@@ -277,21 +251,18 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
             json.dump(sim_params, f, indent=2)
 
 
-def build_dataset(
-    config: dict, seed: int | None = None, save: bool = True, n_jobs: int = 1, show_progress: bool = False
-) -> dict:
+def build_dataset(config: dict, seed: int | None = None, save: bool = True, n_jobs: int = 1) -> dict:
     """End-to-end pipeline: LHS sample -> solve FDM -> split -> normalize -> save.
 
     Returns a dict with the raw sims and processed tensors per split plus the
     normalization stats, so callers (and tests) can inspect the result without
-    re-reading it from disk. See generate_dataset's docstring for `n_jobs` and
-    `show_progress`.
+    re-reading it from disk. See generate_dataset's docstring for `n_jobs`.
     """
     ds_cfg = config["dataset"]
     split_cfg = ds_cfg["split"]
     n_total = split_cfg["train"] + split_cfg["val"] + split_cfg["test"]
 
-    sims = generate_dataset(n_total, config, seed, n_jobs=n_jobs, show_progress=show_progress)
+    sims = generate_dataset(n_total, config, seed, n_jobs=n_jobs)
 
     n_train, n_val = split_cfg["train"], split_cfg["val"]
     sims_by_split = {
