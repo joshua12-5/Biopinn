@@ -154,7 +154,7 @@ BIOPINN/
 | `run_optimization.py` | Per-radius `(d_NP*, C0*)` + max η, the homogeneous-vs-heterogeneous comparison (H3), and the PINN-vs-FDM speedup study (H6) → `results/optimization/optimization_report.json`. |
 | `make_figures.py` | All publication figures for one representative test simulation + the effectiveness surface + H3 + (if a baseline checkpoint exists) the ablation figure → `results/figures/`. |
 | `run_dashboard.py` | Launches the interactive results dashboard (see below). |
-| `generate_results.py` | The full manuscript Results & Discussion asset pack: Fig 4.1–4.10 (PNG+PDF, 300 DPI) and Table 4.1–4.9 (CSV + one compiled `BIOPINN_results_tables.docx`) → `results/paper/`, plus `results_manifest.json` recording the source/config/key values behind every number. Skips Table 4.8 (ablation) with a clear note if no baseline checkpoint is present. |
+| `generate_results.py` | The full manuscript Results & Discussion asset pack, in APA (7th ed.) style: 10 figures (PNG+PDF, 300 DPI, no caption baked into the image) and 9 tables (CSV + one compiled `BIOPINN_results_tables_<mode>.docx` with APA three-line borders, bold "Table N" + italicized title, "Note." footnotes) → `results/paper/`, plus `FIGURE_CAPTIONS_<mode>.md` (bold "Figure N" + italicized title, since captions live outside the image files) and `results_manifest_<mode>.json` recording the source/config/key values behind every number. `--numbering {chapter,sequential}` picks `<mode>`: `chapter` (default, e.g. Table 4.1 — unchanged from before) or `sequential` (plain Table 1, Figure 1 — run once per mode to get both, filenames never collide). Skips Table 4.8/8 (ablation) with a clear note if no baseline checkpoint is present. |
 
 ### `app/` — results dashboard
 

@@ -180,6 +180,10 @@ def test_fig_4_1_concentration_heatmap(model):
     fig, meta = R.fig_4_1_concentration_heatmap(model, FAST_CONFIG, NORM_STATS, n_r=15, n_t=10)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["max_concentration_uM"] >= 0
+    assert meta["caption"] == "Spatiotemporal Concentration Heatmap"
+    # APA figures carry no caption inside the image itself (see scripts/generate_results.py's
+    # FIGURE_CAPTIONS_<mode>.md, where meta["caption"] actually ends up) -- only axis labels/data.
+    assert fig.axes[0].get_title() == ""
     R.plt.close(fig)
 
 
@@ -187,6 +191,7 @@ def test_fig_4_2_radial_profiles(model):
     fig, meta = R.fig_4_2_radial_profiles(model, FAST_CONFIG, NORM_STATS, n_r=15)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["time_points_hr"] == FAST_CONFIG["paper"]["sweeps"]["time_points_hr"]
+    assert meta["caption"] == "Radial Concentration Profiles at Selected Time Points"
     R.plt.close(fig)
 
 
@@ -195,6 +200,7 @@ def test_fig_4_3_pinn_vs_fdm_t24(model):
     fig, meta = R.fig_4_3_pinn_vs_fdm_t24(model, FAST_CONFIG, NORM_STATS, diameter_sweep=sweep)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["mean_abs_residual_uM"] >= 0
+    assert meta["caption"].startswith("PINN vs. FDM Concentration Profile Comparison")
     R.plt.close(fig)
 
 
@@ -203,6 +209,7 @@ def test_fig_4_4_scatter_pred_vs_ref(model, sims):
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["n_test_sims"] == len(sims)
     assert -np.inf < meta["r2"] <= 1.0
+    assert meta["caption"] == "PINN Predicted vs. FDM Reference Concentrations"
     R.plt.close(fig)
 
 
@@ -210,6 +217,7 @@ def test_fig_4_5_training_loss(history):
     fig, meta = R.fig_4_5_training_loss(history, FAST_CONFIG)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["n_logged_steps"] == 30
+    assert meta["caption"] == "Training Loss Convergence Curves"
     R.plt.close(fig)
 
 
@@ -217,6 +225,7 @@ def test_fig_4_6_penetration_vs_time(model):
     fig, meta = R.fig_4_6_penetration_vs_time(model, FAST_CONFIG, NORM_STATS, n_r=15, n_t=8)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert set(meta["final_penetration_depth_um"].keys()) == set(FAST_CONFIG["paper"]["sweeps"]["d_NP_nm"])
+    assert meta["caption"] == "Drug Penetration Depth vs. Time for Five Nanoparticle Diameters"
     R.plt.close(fig)
 
 
@@ -224,6 +233,7 @@ def test_fig_4_7_viability_t72(model):
     fig, meta = R.fig_4_7_viability_t72(model, FAST_CONFIG, NORM_STATS, n_r=20, n_t=8)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert set(meta["zone_mean_viability_pct"].keys()) == set(R.ZONE_COLORS.keys())
+    assert meta["caption"].startswith("Spatial Cell Viability Distribution")
     R.plt.close(fig)
 
 
@@ -231,6 +241,7 @@ def test_fig_4_8_cytotoxicity_evolution(model):
     fig, meta = R.fig_4_8_cytotoxicity_evolution(model, FAST_CONFIG, NORM_STATS, n_r=15)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert len(meta["time_points_hr"]) <= 5
+    assert meta["caption"] == "Cytotoxicity Evolution Maps at Five Time Points"
     R.plt.close(fig)
 
 
@@ -238,6 +249,7 @@ def test_fig_4_9_hetero_vs_homog():
     fig, meta = R.fig_4_9_hetero_vs_homog(FAST_CONFIG)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["D_eff_homogeneous_um2_per_hr"] > 0
+    assert meta["caption"].startswith("Heterogeneous vs. Homogeneous D_eff")
     R.plt.close(fig)
 
 
@@ -245,6 +257,7 @@ def test_fig_4_10_effectiveness_surface(model):
     fig, meta = R.fig_4_10_effectiveness_surface(model, FAST_CONFIG, NORM_STATS)
     assert isinstance(fig, matplotlib.figure.Figure)
     assert meta["R_um"] == FAST_CONFIG["paper"]["baseline"]["R_um"]
+    assert meta["caption"].startswith("Treatment Effectiveness Surface")
     R.plt.close(fig)
 
 

@@ -167,9 +167,8 @@ def fig_4_1_concentration_heatmap(model, config: dict, norm_stats: dict, n_r: in
     cbar.set_label("Concentration C (μM)")
     ax.set_xlabel("Radial distance r (μm)")
     ax.set_ylabel("Time t (hr)")
-    ax.set_title("Figure 4.1 — Spatiotemporal Concentration Heatmap")
     fig.tight_layout()
-    return fig, {"params": params, "max_concentration_uM": float(C.max())}
+    return fig, {"params": params, "max_concentration_uM": float(C.max()), "caption": "Spatiotemporal Concentration Heatmap"}
 
 
 def fig_4_2_radial_profiles(model, config: dict, norm_stats: dict, n_r: int = 200):
@@ -186,11 +185,10 @@ def fig_4_2_radial_profiles(model, config: dict, norm_stats: dict, n_r: int = 20
         ax.plot(r, C[i, :], color=colors[i], linewidth=2, label=f"t = {hours:g} hr")
     ax.set_xlabel("Radial distance r (μm)")
     ax.set_ylabel("Concentration C (μM)")
-    ax.set_title("Figure 4.2 — Radial Concentration Profiles at Selected Time Points")
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    return fig, {"params": params, "time_points_hr": time_points}
+    return fig, {"params": params, "time_points_hr": time_points, "caption": "Radial Concentration Profiles at Selected Time Points"}
 
 
 def fig_4_3_pinn_vs_fdm_t24(model, config: dict, norm_stats: dict, diameter_sweep: dict | None = None):
@@ -209,7 +207,6 @@ def fig_4_3_pinn_vs_fdm_t24(model, config: dict, norm_stats: dict, diameter_swee
     ax_main.plot(r, C_true, "k-", linewidth=2, label="FDM reference")
     ax_main.plot(r, C_pred, color="#1c7c74", linestyle="--", linewidth=2, label="PINN prediction")
     ax_main.set_ylabel("Concentration C (μM)")
-    ax_main.set_title(f"Figure 4.3 — PINN vs. FDM Concentration Profile Comparison at t={t_fdm[t_idx]:.0f}hr")
     ax_main.legend(fontsize=9)
     ax_main.grid(alpha=0.3)
 
@@ -225,6 +222,7 @@ def fig_4_3_pinn_vs_fdm_t24(model, config: dict, norm_stats: dict, diameter_swee
         "t_hr": float(t_fdm[t_idx]),
         "mean_abs_residual_uM": float(np.mean(np.abs(residual))),
         "max_abs_residual_uM": float(np.max(np.abs(residual))),
+        "caption": f"PINN vs. FDM Concentration Profile Comparison at t = {t_fdm[t_idx]:.0f} hr",
     }
 
 
@@ -256,13 +254,19 @@ def fig_4_4_scatter_pred_vs_ref(model, config: dict, norm_stats: dict, sims: lis
     ax.plot([lo, hi], [lo, hi], "k--", linewidth=1.5, label="y = x")
     ax.set_xlabel("FDM reference concentration (μM)")
     ax.set_ylabel("PINN predicted concentration (μM)")
-    ax.set_title("Figure 4.4 — PINN Predicted vs. FDM Reference Concentrations")
     ax.text(0.05, 0.92, f"R² = {metrics['r2']:.4f}\nN = {n_points:,} points ({len(sims)} sims)", transform=ax.transAxes, fontsize=10, va="top")
     ax.legend(loc="lower right", fontsize=9)
     ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
 
-    return fig, {"n_test_sims": len(sims), "n_points": n_points, "n_points_plotted": len(plot_pred), "r2": metrics["r2"], "rmse": metrics["rmse"]}
+    return fig, {
+        "n_test_sims": len(sims),
+        "n_points": n_points,
+        "n_points_plotted": len(plot_pred),
+        "r2": metrics["r2"],
+        "rmse": metrics["rmse"],
+        "caption": "PINN Predicted vs. FDM Reference Concentrations",
+    }
 
 
 def fig_4_5_training_loss(history: dict, config: dict):
@@ -279,11 +283,10 @@ def fig_4_5_training_loss(history: dict, config: dict):
         ax.set_title(f"{key} loss")
         ax.set_xlabel("iteration")
         ax.grid(alpha=0.3)
-    fig.suptitle("Figure 4.5 — Training Loss Convergence Curves")
     fig.tight_layout()
 
     final_values = {key: float(history[key][-1]) if len(history[key]) else float("nan") for key in HISTORY_KEYS}
-    return fig, {"n_logged_steps": len(history.get("total", [])), "final_losses": final_values}
+    return fig, {"n_logged_steps": len(history.get("total", [])), "final_losses": final_values, "caption": "Training Loss Convergence Curves"}
 
 
 def fig_4_6_penetration_vs_time(model, config: dict, norm_stats: dict, n_r: int = 150, n_t: int = 60):
@@ -306,12 +309,15 @@ def fig_4_6_penetration_vs_time(model, config: dict, norm_stats: dict, n_r: int 
 
     ax.set_xlabel("Time t (hr)")
     ax.set_ylabel("Penetration depth (μm)")
-    ax.set_title("Figure 4.6 — Drug Penetration Depth vs. Time for Five Nanoparticle Diameters")
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
 
-    return fig, {"params": params, "final_penetration_depth_um": final_depths}
+    return fig, {
+        "params": params,
+        "final_penetration_depth_um": final_depths,
+        "caption": "Drug Penetration Depth vs. Time for Five Nanoparticle Diameters",
+    }
 
 
 def fig_4_7_viability_t72(model, config: dict, norm_stats: dict, n_r: int = 200, n_t: int = 60):
@@ -339,12 +345,15 @@ def fig_4_7_viability_t72(model, config: dict, norm_stats: dict, n_r: int = 200,
     ax.set_xlabel("Radial distance r (μm)")
     ax.set_ylabel("Viability V (%)")
     ax.set_ylim(0, 110)
-    ax.set_title(f"Figure 4.7 — Spatial Cell Viability Distribution at t={params['t_max_hr']:.0f}hr, Baseline Configuration")
     ax.grid(alpha=0.3)
     fig.tight_layout()
 
     zone_means = {z: float(V[zones == z].mean()) if (zones == z).any() else float("nan") for z in ZONE_COLORS}
-    return fig, {"params": params, "zone_mean_viability_pct": zone_means}
+    return fig, {
+        "params": params,
+        "zone_mean_viability_pct": zone_means,
+        "caption": f"Spatial Cell Viability Distribution at t = {params['t_max_hr']:.0f} hr, Baseline Configuration",
+    }
 
 
 def fig_4_8_cytotoxicity_evolution(model, config: dict, norm_stats: dict, n_r: int = 150):
@@ -369,10 +378,9 @@ def fig_4_8_cytotoxicity_evolution(model, config: dict, norm_stats: dict, n_r: i
         ax.set_ylim(0, 100)
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("Cytotoxicity (%)")
-    fig.suptitle("Figure 4.8 — Cytotoxicity Evolution Maps at Five Time Points")
     fig.tight_layout()
 
-    return fig, {"params": params, "time_points_hr": plot_time_points}
+    return fig, {"params": params, "time_points_hr": plot_time_points, "caption": "Cytotoxicity Evolution Maps at Five Time Points"}
 
 
 def fig_4_9_hetero_vs_homog(config: dict, solved: dict | None = None):
@@ -386,12 +394,15 @@ def fig_4_9_hetero_vs_homog(config: dict, solved: dict | None = None):
     ax.plot(r, homog["C"][-1, :], color="#b3462c", linestyle="--", linewidth=2.5, label="Homogeneous (mean) D_eff")
     ax.set_xlabel("Radial distance r (μm)")
     ax.set_ylabel("Concentration C (μM)")
-    ax.set_title(f"Figure 4.9 — Heterogeneous vs. Homogeneous D_eff Concentration Profile Comparison (t={p['t_max_hr']:.0f}hr)")
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
 
-    return fig, {"params": p, "D_eff_homogeneous_um2_per_hr": solved["D_eff_homogeneous_um2_per_hr"]}
+    return fig, {
+        "params": p,
+        "D_eff_homogeneous_um2_per_hr": solved["D_eff_homogeneous_um2_per_hr"],
+        "caption": f"Heterogeneous vs. Homogeneous D_eff Concentration Profile Comparison (t = {p['t_max_hr']:.0f} hr)",
+    }
 
 
 def fig_4_10_effectiveness_surface(model, config: dict, norm_stats: dict, grid_result: dict | None = None):
@@ -408,11 +419,16 @@ def fig_4_10_effectiveness_surface(model, config: dict, norm_stats: dict, grid_r
     ax.scatter([grid_result["C0_star_uM"]], [grid_result["d_NP_star_nm"]], color="#b3462c", marker="*", s=260, edgecolors="white", linewidths=0.8, label="optimum", zorder=5)
     ax.set_xlabel("Surface concentration C0 (μM)")
     ax.set_ylabel("Nanoparticle diameter d_NP (nm)")
-    ax.set_title(f"Figure 4.10 — Treatment Effectiveness Surface η(d_NP, C0) at R={params['R_um']:.0f}μm")
     ax.legend(loc="upper right", fontsize=9)
     fig.tight_layout()
 
-    return fig, {"R_um": params["R_um"], "d_NP_star_nm": grid_result["d_NP_star_nm"], "C0_star_uM": grid_result["C0_star_uM"], "max_eta_pct": grid_result["max_eta"] * 100.0}
+    return fig, {
+        "R_um": params["R_um"],
+        "d_NP_star_nm": grid_result["d_NP_star_nm"],
+        "C0_star_uM": grid_result["C0_star_uM"],
+        "max_eta_pct": grid_result["max_eta"] * 100.0,
+        "caption": f"Treatment Effectiveness Surface η(d_NP, C0) at R = {params['R_um']:.0f} μm",
+    }
 
 
 # --------------------------------------------------------------------------- #
