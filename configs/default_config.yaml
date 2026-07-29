@@ -51,22 +51,31 @@ fdm:
 # Synthetic dataset (LHS over 5D parameter space)
 # ---------------------------------------------------------------------------
 dataset:
-  n_simulations: 10000
+  # n_simulations scaled back down from 10,000 -- full-batch training (see
+  # src/train.py) processes every train-split point every iteration, and at
+  # 10,000 sims that's ~97 hours worst-case for the full 25,000-iteration
+  # schedule (measured on an L4: ~17.5 sec/epoch, almost all of it the
+  # physics/collocation term), well past Colab Pro's 24-hour session cap.
+  # 2,000 sims cuts the train split (and thus every loss term's point count)
+  # 5x, bringing that down to roughly 25-28 hours -- still tight against the
+  # 24h cap, so also trim training.adam.iters/training.lbfgs.iters if it's
+  # still running long.
+  n_simulations: 2000
   split:
-    train: 7000
-    val: 1500
-    test: 1500
+    train: 1400
+    val: 300
+    test: 300
   parameter_ranges:
     R_um: [100, 500]           # tumor radius, um
     d_NP_nm: [10, 200]         # nanoparticle diameter, nm
     C0_uM: [0.1, 20]           # initial/surface drug concentration, uM
     k_d_per_hr: [0.005, 0.05]  # drug decay rate, 1/hr
     t_max_hr: [24, 72]         # simulation duration, hr
-  # points_per_sim scaled down 5x from the 2000-sim default (3000/7500/500/500/500)
-  # so the total training-batch size (points_per_sim * train sims) -- and thus
-  # full-batch training memory/time, see src/train.py -- stays close to the
-  # already-tested scale even though n_simulations is 5x larger: more distinct
-  # (R, d_NP, C0, k_d, t_max) combinations, not more points per combination.
+  # Deliberately NOT reverted to the old 2000-sim-era values (3000/7500/500/
+  # 500/500) -- keeping points_per_sim at this reduced level is what actually
+  # cuts total training-batch size (and therefore full-batch training time)
+  # alongside the n_simulations cut above, rather than just trading one 5x
+  # factor for another and landing back at the same total point count.
   points_per_sim:
     data: 600                  # interior FDM-labeled points -> L_data
     collocation: 1500           # PDE residual points -> L_phys

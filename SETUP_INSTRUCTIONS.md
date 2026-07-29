@@ -175,8 +175,8 @@ You have two ways to get the code onto Colab — pick one.
    Drive & load config" section). It **defaults to `True`**, which runs a
    small few-minute sanity version of the whole pipeline — good for
    confirming everything works before committing to a long run. Set it to
-   `False` and re-run for the real, full-scale run (10,000 simulated
-   tumors; budget roughly 5–17 hours total on a T4, mostly data
+   `False` and re-run for the real, full-scale run (2,000 simulated
+   tumors; budget roughly 1–3.5 hours total on a T4, mostly data
    generation). Free Colab sessions cap out around 12 hours with no
    built-in resume, so if a run might exceed that, either use Colab Pro,
    generate the dataset locally first (see "Training locally instead of
@@ -229,7 +229,7 @@ cell:
 python scripts/generate_dataset.py --experiment experiment_1 --n-jobs 8
 ```
 
-(drop `--experiment` for the full 10,000-sim production dataset; `--n-jobs`
+(drop `--experiment` for the full 2,000-sim production dataset; `--n-jobs`
 defaults to all CPU cores). Then open the training notebook, set
 `DATA_ALREADY_GENERATED = True` next to `QUICK_TEST`, and run the rest of
 the notebook — it loads the script's output instead of regenerating it.
@@ -292,9 +292,10 @@ table pack in one command.
 ## 7. Generate figures & tables for a research paper
 
 `scripts/generate_results.py` produces a complete, publication-ready
-Results & Discussion asset pack in one command — every figure and table a
-manuscript needs, computed from your actual trained model and data, no
-manual chart-making required.
+Results & Discussion asset pack in one command, formatted per **APA (7th
+edition)** conventions — every figure and table a manuscript needs,
+computed from your actual trained model and data, no manual chart-making
+or reformatting required.
 
 ```bash
 python scripts/generate_results.py
@@ -302,12 +303,24 @@ python scripts/generate_results.py
 
 This takes a few minutes on an ordinary CPU (it re-solves several reference
 simulations and runs a small optimization search along the way). Everything
-is written to `results/paper/`:
+is written to `results/paper/`.
+
+**Numbering scheme:** add `--numbering sequential` for plain APA
+journal-article numbering (Table 1, Figure 1...) instead of the default
+`--numbering chapter` (Table 4.1, Figure 4.1... — a dissertation-chapter
+convention, also valid APA style). Filenames never collide between the two
+modes, so you can run the command twice (once per value) and get both sets
+side by side in `results/paper/`.
 
 **10 figures**, each saved as both a PNG and a PDF at 300 DPI (use the PDF
-for LaTeX/Word, the PNG for quick previews or slides):
+for LaTeX/Word, the PNG for quick previews or slides). Per APA figure
+convention, **no caption is drawn inside the image itself** — only axis
+labels, legend, and data — the caption text lives in a separate
+`FIGURE_CAPTIONS_<mode>.md` file (bold "Figure N" + italicized title, matching
+APA style), for you to place under each figure when you drop it into your
+paper:
 
-| File | What it shows |
+| File (chapter mode; drop the `4_` for sequential mode) | What it shows |
 |---|---|
 | `fig_4_1_concentration_heatmap` | Drug concentration across space and time, one heatmap |
 | `fig_4_2_radial_concentration_profiles` | Concentration vs. radial distance, overlaid at six time points |
@@ -321,15 +334,18 @@ for LaTeX/Word, the PNG for quick previews or slides):
 | `fig_4_10_effectiveness_surface` | Best nanoparticle size + dose combination, visualized as a heatmap with the optimum marked |
 
 **9 tables**, each saved as its own CSV and also compiled together into one
-Word document:
+Word document, formatted as APA's "three-line table" (no vertical rules, no
+shading — just a rule above the header, below the header, and below the
+last row), with a bold "Table N" + italicized title above each table and
+any footnote as an italicized "Note." label + regular text below it:
 
 - `table_4_1.csv` through `table_4_9.csv` — one file per table
-- `BIOPINN_results_tables.docx` — all nine tables in a single captioned
+- `BIOPINN_results_tables_<mode>.docx` — all nine tables in a single
   document, ready to copy straight into a paper
 
-**`results_manifest.json`** — records exactly what parameters, config, and
-source data went into every figure and table, so every number in the pack
-is traceable back to how it was computed.
+**`results_manifest_<mode>.json`** — records exactly what parameters,
+config, and source data went into every figure and table, so every number
+in the pack is traceable back to how it was computed.
 
 **Requirements:** the trained checkpoint (step 5) is always required.
 `artifacts/training_history.json` (also step 5) is needed specifically for
@@ -342,9 +358,11 @@ scripts/run_ablation.py` once, since that's what trains the comparison
 network it needs. Every other figure and table is produced either way.
 
 **Using the output in a paper:**
-- LaTeX: `\includegraphics{fig_4_1_concentration_heatmap.pdf}`
-- Word/Google Docs: drag in the `.png` files, or copy tables straight out
-  of `BIOPINN_results_tables.docx`
+- LaTeX: `\includegraphics{fig_4_1_concentration_heatmap.pdf}`, with the
+  matching caption copied from `FIGURE_CAPTIONS_<mode>.md`
+- Word/Google Docs: drag in the `.png` files (add the caption from
+  `FIGURE_CAPTIONS_<mode>.md` underneath), or copy tables straight out of
+  `BIOPINN_results_tables_<mode>.docx`
 - Spreadsheet: import any individual `table_4_*.csv`
 
 Point it at a different config the same way as the other scripts, e.g. the
@@ -352,6 +370,7 @@ small dev-scale config for a fast end-to-end check:
 
 ```bash
 python scripts/generate_results.py --experiment experiment_1
+python scripts/generate_results.py --experiment experiment_1 --numbering sequential
 ```
 
 **One result worth understanding before writing it up:** Table 4.6 and
@@ -362,7 +381,7 @@ fully-saturating drug dose, that difference can shrink to nearly nothing —
 that's a real, physically-expected property of the underlying model (a
 saturated tumor has little contrast left to detect), not a script error.
 If your output there looks smaller than you expected, check
-`results_manifest.json` for the exact parameters used before drawing
+`results_manifest_<mode>.json` for the exact parameters used before drawing
 conclusions in a "Discussion" section.
 
 ---
@@ -459,11 +478,43 @@ still fails, install PyTorch first by itself following the exact command
 for your system from [pytorch.org/get-started](https://pytorch.org/get-started/locally/),
 then re-run `pip install -r requirements.txt`.
 
-**Colab: "CUDA out of memory" or it seems to hang**
+**Colab: it seems to hang**
 Restart the runtime (Runtime → Restart runtime) and run again — this is
-usually a one-off hiccup, not a real memory problem, at the dataset sizes
-this notebook uses. Also double check Runtime → Change runtime type is
+usually a one-off hiccup. Also double check Runtime → Change runtime type is
 actually set to a GPU.
+
+**Training crashes with `CUDA out of memory`**
+This is a real, reproducible memory limit, not a hiccup — training is
+full-batch (every iteration processes the entire train split at once, no
+mini-batching), and the physics loss's second-order autograd over millions
+of collocation points can genuinely exceed GPU memory at full 10,000-sim
+production scale (seen in practice on a 22GB GPU).
+`configs/default_config.yaml`'s `training.max_points_per_chunk` (default
+`1000000`) already guards against this: it computes and backpropagates each
+loss term in point-count-bounded chunks instead of one giant forward pass —
+the resulting gradient (and therefore what the model learns) is
+mathematically identical to the unchunked version, only peak memory
+differs. If you still hit `CUDA out of memory` with the default in place,
+lower it (e.g. `500000` or `250000`) and re-run; if you have VRAM to spare
+and want marginally less looping overhead, raise it, or delete the key
+entirely to restore the original single-shot behavior.
+
+**Training looks stuck -- no output for a very long time**
+This is almost always the logging interval, not a hang. `train_adam_phase`
+only prints every `log_every` epochs (1,000 by default) -- full-batch
+training's real per-epoch cost is dominated by the physics/collocation
+term, so at even a fairly fast rate, 1,000 epochs can genuinely take hours
+between printed lines. Two ways to tell the difference from an actual hang:
+check `nvidia-smi` (or Colab's resource panel) for GPU memory usage -- if
+it's non-zero and stable, something is actively running, even if nothing
+has printed yet. If you want more frequent reassurance, lower `log_every`
+(passed to `train_adam_phase`/`train_lbfgs_phase`, or edit their default in
+`src/train.py`) to something like 10-50. `configs/default_config.yaml`'s
+`dataset.n_simulations: 2000` (scaled down from an earlier 10,000-sim
+default specifically because full-batch training at that scale could take
+~97 hours worst-case, past any single Colab session) should already keep a
+full run within a single session; if it's still running long, the biggest
+remaining lever is `training.adam.iters`/`training.lbfgs.iters`.
 
 **Dashboard opens but panels never fill in / show a "not ready" message forever**
 The Evaluation/Optimization/Ablation panels do real computation the first

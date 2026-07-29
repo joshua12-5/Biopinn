@@ -104,6 +104,21 @@ def assign_zones(r: np.ndarray, oxygen: np.ndarray, config: dict) -> np.ndarray:
     return zones
 
 
+def _zone_values(zones: np.ndarray, value_by_zone: dict) -> np.ndarray:
+    """Map each point's zone label to a numeric value, vectorized.
+
+    Loops over the (constant, small: 3) zone names rather than the
+    (potentially millions of) points -- each iteration is one vectorized
+    numpy boolean-mask assignment, not a per-point Python-level dict lookup.
+    Called from the PINN physics loss's hot path (src/losses.py), where
+    `zones` can be a chunk of up to config["training"]["max_points_per_chunk"]
+    collocation points, so this matters for wall-clock training time."""
+    values = np.empty(len(zones), dtype=float)
+    for zone_name, value in value_by_zone.items():
+        values[zones == zone_name] = value
+    return values
+
+
 def effective_diffusivity(
     r: np.ndarray, d_NP_nm: np.ndarray | float, config: dict, R: np.ndarray | float | None = None
 ) -> np.ndarray:
@@ -125,7 +140,7 @@ def effective_diffusivity(
     zones = assign_zones(r, oxygen, config)
     f_zone = config["microenvironment"]["f_zone"]
 
-    f_vals = np.array([f_zone[z] for z in zones])
+    f_vals = _zone_values(zones, f_zone)
     return D_free_um2_hr * f_vals
 
 
@@ -141,5 +156,5 @@ def decay_rate_field(
     zones = assign_zones(r, oxygen, config)
     multiplier = config["microenvironment"]["k_d_multiplier"]
 
-    f_vals = np.array([multiplier[z] for z in zones])
+    f_vals = _zone_values(zones, multiplier)
     return np.asarray(k_d_base, dtype=float) * f_vals

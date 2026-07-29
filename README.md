@@ -53,7 +53,7 @@ hard-coding numbers.
 ## Two-part execution split
 
 Heavy compute (synthetic dataset generation + PINN training) is meant to run
-on a GPU (10,000 FDM simulations + a 20k-iteration Adam phase + an
+on a GPU (2,000 FDM simulations + a 20k-iteration Adam phase + an
 L-BFGS phase — impractical on a CPU-only laptop). Everything else — biology
 maps, evaluation, ablation, optimization, visualization, and the results
 dashboard — runs **locally on CPU**, consuming the trained artifacts. The
@@ -92,7 +92,7 @@ python scripts/generate_dataset.py --experiment experiment_1 --n-jobs 8
 Then open the training notebook, set `DATA_ALREADY_GENERATED = True` next to
 `QUICK_TEST`, and run the rest of the notebook — it loads this script's output via
 `load_processed_dataset()` instead of regenerating it. Omit `--experiment` to
-generate the full 10,000-sim production dataset; `--n-jobs` defaults to all CPU
+generate the full 2,000-sim production dataset; `--n-jobs` defaults to all CPU
 cores.
 
 ```
@@ -219,7 +219,7 @@ hard-codes a POSIX-only path separator. Two Windows-specific notes:
      in cell 5 — if it's `False` because you have the CPU-only build, the
      notebook prints the exact command to reinstall the CUDA build).
 
-   Either way, it generates the 10,000-simulation LHS-sampled FDM dataset
+   Either way, it generates the 2,000-simulation LHS-sampled FDM dataset
    (CFL-enforced), runs two-phase Adam → L-BFGS training with logged loss
    curves, and saves `biopinn_model.pt`, `normalization_stats.json`,
    `training_history.json`, and the processed train/val/test dataset (+
