@@ -6,6 +6,18 @@ search) seeded from the Adam-trained state, per-component loss logging,
 best-checkpoint saving, and the validation convergence/patience criterion.
 Runs on Colab; used unchanged by src/ablation.py locally to train the
 w_phys=0 baseline on CPU for the ablation study.
+
+Training is full-batch, not mini-batched -- every iteration processes the
+entire train split's points at once (see src/data_pipeline.py). At full
+production scale, physics_loss's second-order autograd for the PDE residual
+over millions of collocation points, computed alongside the other four loss
+terms before a single backward() call, can exceed GPU memory. Set
+config["training"]["max_points_per_chunk"] to switch to
+src.losses.composite_loss_chunked, which computes and backward()s each loss
+term in point-count-bounded chunks instead -- the resulting gradient (and
+therefore what gets learned) is mathematically identical to the unchunked
+path; only peak memory differs. Unset (the default) preserves the original
+single-shot behavior exactly.
 """
 
 from __future__ import annotations
@@ -17,7 +29,7 @@ import numpy as np
 import torch
 
 from src.config import resolve_path
-from src.losses import composite_loss, data_loss, physics_loss
+from src.losses import composite_loss, composite_loss_chunked, data_loss, physics_loss, physics_loss_chunked
 from src.model import BIOPINN
 
 HISTORY_KEYS = ("total", "data", "phys", "bc", "neu", "ic")
@@ -30,11 +42,17 @@ def to_tensors(split_tensors: dict, device: str = "cpu") -> dict:
 
 def _evaluate_validation(model: BIOPINN, val_batch: dict, config: dict, norm_stats: dict) -> tuple[float, float]:
     """Return (val_data_loss, val_phys_loss). Physics loss needs its own autograd
-    leaves even in eval mode, so it cannot run under torch.no_grad()."""
+    leaves even in eval mode, so it cannot run under torch.no_grad() -- its
+    graph is chunked the same way as training (see max_points_per_chunk)
+    since it's exactly as memory-heavy per point at eval time."""
+    max_points_per_chunk = config["training"].get("max_points_per_chunk")
     model.eval()
     with torch.no_grad():
         val_data = data_loss(model, val_batch["data_X"], val_batch["data_y"]).item()
-    val_phys = physics_loss(model, val_batch["collocation_X"], config, norm_stats).item()
+    if max_points_per_chunk:
+        val_phys = physics_loss_chunked(model, val_batch["collocation_X"], config, norm_stats, max_points_per_chunk)
+    else:
+        val_phys = physics_loss(model, val_batch["collocation_X"], config, norm_stats).item()
     model.train()
     return val_data, val_phys
 
@@ -53,6 +71,7 @@ def train_adam_phase(
     conv_cfg = config["training"]["convergence"]
     nan_cfg = config["training"]["nan_recovery"]
     ramp_cfg = config["loss"].get("w_phys_ramp", {})
+    max_points_per_chunk = config["training"].get("max_points_per_chunk")
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=adam_cfg["lr"], betas=tuple(adam_cfg["betas"]), eps=adam_cfg["eps"]
@@ -89,7 +108,16 @@ def train_adam_phase(
         weight_overrides = {"w_phys": w_phys} if w_phys is not None else None
 
         optimizer.zero_grad()
-        losses = composite_loss(model, batch, config, norm_stats, weight_overrides=weight_overrides)
+        if max_points_per_chunk:
+            # Chunked path already backward()-ed (once per chunk, per term) as
+            # a side effect -- see composite_loss_chunked. Any partial/NaN
+            # gradients from a diverging chunk are harmless: the NaN branch
+            # below never calls optimizer.step(), and the next epoch's
+            # zero_grad() (top of this loop) discards them before the next
+            # backward pass.
+            losses = composite_loss_chunked(model, batch, config, norm_stats, max_points_per_chunk, weight_overrides=weight_overrides)
+        else:
+            losses = composite_loss(model, batch, config, norm_stats, weight_overrides=weight_overrides)
         total = losses["total"]
 
         if not torch.isfinite(total):
@@ -104,7 +132,8 @@ def train_adam_phase(
                 ramp_state.update(active=True, start_epoch=epoch, start_w=0.001)
             continue
 
-        total.backward()
+        if not max_points_per_chunk:
+            total.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), adam_cfg["grad_clip_norm"])
         optimizer.step()
         scheduler.step()
@@ -161,6 +190,7 @@ def train_lbfgs_phase(
     diverges to a non-finite loss.
     """
     lbfgs_cfg = config["training"]["lbfgs"]
+    max_points_per_chunk = config["training"].get("max_points_per_chunk")
 
     pre_lbfgs_state = copy.deepcopy(model.state_dict())
 
@@ -178,8 +208,11 @@ def train_lbfgs_phase(
 
     def closure():
         optimizer.zero_grad()
-        losses = composite_loss(model, batch, config, norm_stats)
-        losses["total"].backward()
+        if max_points_per_chunk:
+            losses = composite_loss_chunked(model, batch, config, norm_stats, max_points_per_chunk)
+        else:
+            losses = composite_loss(model, batch, config, norm_stats)
+            losses["total"].backward()
         for k in HISTORY_KEYS:
             history[k].append(losses[k].item())
         call_count["n"] += 1

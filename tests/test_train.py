@@ -105,6 +105,36 @@ def test_train_adam_phase_survives_nan_batch_without_raising():
         assert torch.all(torch.isfinite(p))
 
 
+def test_train_adam_phase_with_forced_multi_chunk_matches_unchunked():
+    """config["training"]["max_points_per_chunk"] routes train_adam_phase
+    through composite_loss_chunked (see src/losses.py); with a chunk size
+    far smaller than FAST_CONFIG's per-category point counts (data=240,
+    collocation=400, bc_surface/bc_center/ic=60 each, for 4 train sims),
+    every term genuinely loops over multiple chunks each epoch. Starting
+    from identical weights, this must produce the same trained parameters
+    (within float tolerance) as the unchunked path after the same number of
+    epochs -- proving the chunking config knob doesn't change what's
+    learned, only peak memory."""
+    result = _dataset()
+    train_batch = to_tensors(result["splits"]["train"])
+    val_batch = to_tensors(result["splits"]["val"])
+
+    model_unchunked = BIOPINN(FAST_CONFIG)
+    model_chunked = BIOPINN(FAST_CONFIG)
+    model_chunked.load_state_dict(copy.deepcopy(model_unchunked.state_dict()))
+
+    config_unchunked = copy.deepcopy(FAST_CONFIG)
+    config_unchunked["training"]["max_points_per_chunk"] = None
+    config_chunked = copy.deepcopy(FAST_CONFIG)
+    config_chunked["training"]["max_points_per_chunk"] = 7
+
+    train_adam_phase(model_unchunked, train_batch, val_batch, config_unchunked, result["stats"], log_every=0)
+    train_adam_phase(model_chunked, train_batch, val_batch, config_chunked, result["stats"], log_every=0)
+
+    for p_unchunked, p_chunked in zip(model_unchunked.parameters(), model_chunked.parameters()):
+        assert torch.allclose(p_chunked, p_unchunked, atol=1e-4, rtol=1e-3)
+
+
 def test_train_lbfgs_phase_runs_and_returns_finite_history():
     result = _dataset()
     model = BIOPINN(FAST_CONFIG)
@@ -122,6 +152,52 @@ def test_train_lbfgs_phase_runs_and_returns_finite_history():
     assert all(np.isfinite(v) for v in lbfgs_result["history"]["total"])
     assert np.isfinite(lbfgs_result["val_data"])
     assert np.isfinite(lbfgs_result["val_phys"])
+
+
+def test_train_lbfgs_phase_with_forced_multi_chunk_runs_and_returns_finite_history():
+    config = copy.deepcopy(FAST_CONFIG)
+    config["training"]["max_points_per_chunk"] = 7
+
+    result = build_dataset(config, seed=9, save=False)
+    model = BIOPINN(config)
+    train_batch = to_tensors(result["splits"]["train"])
+    val_batch = to_tensors(result["splits"]["val"])
+
+    train_adam_phase(model, train_batch, val_batch, config, result["stats"], log_every=0)
+    lbfgs_result = train_lbfgs_phase(model, train_batch, val_batch, config, result["stats"], log_every=0)
+
+    assert lbfgs_result["closure_evaluations"] > 0
+    assert all(np.isfinite(v) for v in lbfgs_result["history"]["total"])
+    assert np.isfinite(lbfgs_result["val_data"])
+    assert np.isfinite(lbfgs_result["val_phys"])
+    for p in model.parameters():
+        assert torch.all(torch.isfinite(p))
+
+
+def test_train_adam_phase_with_chunking_survives_nan_batch_without_raising():
+    """Same as test_train_adam_phase_survives_nan_batch_without_raising, but
+    through the chunked path -- confirms backward-as-you-go chunking doesn't
+    leave corrupted gradients lying around when a chunk produces a
+    non-finite loss: optimizer.step() is still skipped every epoch (the
+    NaN branch continues past it), and the next epoch's zero_grad() clears
+    whatever partial gradient a prior chunk accumulated."""
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    train_batch = to_tensors(result["splits"]["train"])
+    val_batch = to_tensors(result["splits"]["val"])
+
+    poisoned = dict(train_batch)
+    poisoned["data_y"] = poisoned["data_y"].clone()
+    poisoned["data_y"][0, 0] = float("nan")
+
+    config = copy.deepcopy(FAST_CONFIG)
+    config["training"]["adam"]["iters"] = 5
+    config["training"]["max_points_per_chunk"] = 7
+
+    adam_result = train_adam_phase(model, poisoned, val_batch, config, result["stats"], log_every=0)
+    assert adam_result["history"]["total"] == []
+    for p in model.parameters():
+        assert torch.all(torch.isfinite(p))
 
 
 def test_save_and_load_checkpoint_round_trip(tmp_path):
