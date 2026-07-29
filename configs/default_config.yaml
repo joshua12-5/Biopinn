@@ -129,6 +129,18 @@ loss:
 # Training schedule (two-phase Adam -> L-BFGS)
 # ---------------------------------------------------------------------------
 training:
+  # Full-batch training (see src/train.py) means every iteration processes
+  # every train-split point at once; at full 10,000-sim scale the collocation
+  # set's second-order-autograd PDE-residual graph can exceed GPU memory
+  # (observed: CUDA OOM on a 22GB GPU). max_points_per_chunk switches
+  # composite_loss_chunked on, which computes/backward()s each loss term in
+  # chunks of at most this many points -- identical resulting gradient,
+  # bounded peak memory. 1,000,000 is a conservative default (empirically,
+  # the physics term alone needs roughly 2.3GB per million collocation
+  # points at peak); raise it on a bigger GPU for slightly less looping
+  # overhead, or comment it out entirely to restore the original
+  # single-shot behavior on a GPU with enough VRAM to not need it.
+  max_points_per_chunk: 1000000
   adam:
     iters: 20000
     lr: 1.0e-3

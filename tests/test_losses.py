@@ -5,18 +5,21 @@ src/data_pipeline.py's fast test config (see tests/test_data_pipeline.py)."""
 import copy
 
 import numpy as np
+import pytest
 import torch
 
 from src.config import load_config
 from src.data_pipeline import build_dataset
 from src.losses import (
     composite_loss,
+    composite_loss_chunked,
     data_loss,
     dirichlet_bc_loss,
     ic_loss,
     neumann_bc_loss,
     pde_residual,
     physics_loss,
+    physics_loss_chunked,
 )
 from src.model import BIOPINN
 
@@ -141,3 +144,80 @@ def test_composite_loss_backward_updates_parameters():
 
     changed = any(not torch.equal(b, a) for b, a in zip(before, model.parameters()))
     assert changed
+
+
+def test_composite_loss_chunked_matches_unchunked_value_and_gradient():
+    """Chunking is a memory optimization, not an approximation -- with a chunk
+    size much smaller than every category's point count (forcing several
+    chunks per term: data=160, collocation=240, bc_surface/bc_center/ic=40
+    each, for FAST_CONFIG's 4 train sims), composite_loss_chunked must
+    produce the exact same total/per-term values and the exact same
+    accumulated gradient as composite_loss + a single backward() on an
+    identically-initialized model."""
+    result = _dataset()
+    batch = _batch_as_tensors(result["splits"]["train"])
+
+    model_unchunked = BIOPINN(FAST_CONFIG)
+    model_chunked = BIOPINN(FAST_CONFIG)
+    model_chunked.load_state_dict(copy.deepcopy(model_unchunked.state_dict()))
+
+    losses_unchunked = composite_loss(model_unchunked, batch, FAST_CONFIG, result["stats"])
+    losses_unchunked["total"].backward()
+
+    losses_chunked = composite_loss_chunked(model_chunked, batch, FAST_CONFIG, result["stats"], max_points_per_chunk=7)
+
+    for key in ("total", "data", "phys", "bc", "neu", "ic"):
+        assert torch.allclose(losses_chunked[key], losses_unchunked[key], atol=1e-5), key
+
+    for p_unchunked, p_chunked in zip(model_unchunked.parameters(), model_chunked.parameters()):
+        assert torch.allclose(p_chunked.grad, p_unchunked.grad, atol=1e-5, rtol=1e-4)
+
+
+def test_composite_loss_chunked_backward_updates_parameters():
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    batch = _batch_as_tensors(result["splits"]["train"])
+
+    before = [p.clone() for p in model.parameters()]
+    composite_loss_chunked(model, batch, FAST_CONFIG, result["stats"], max_points_per_chunk=7)
+
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    optimizer.step()
+
+    changed = any(not torch.equal(b, a) for b, a in zip(before, model.parameters()))
+    assert changed
+
+
+def test_composite_loss_chunked_single_chunk_matches_unchunked():
+    """max_points_per_chunk larger than every category (the no-real-chunking
+    case, e.g. the shipped default_config.yaml's 1,000,000 against a small
+    dataset) must behave identically to the chunked-with-small-chunks case
+    above -- i.e. chunking degenerates cleanly rather than needing a
+    separate code path."""
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    batch = _batch_as_tensors(result["splits"]["train"])
+
+    losses = composite_loss_chunked(model, batch, FAST_CONFIG, result["stats"], max_points_per_chunk=1_000_000)
+    for key in ("total", "data", "phys", "bc", "neu", "ic"):
+        assert np.isfinite(losses[key].item())
+
+
+def test_physics_loss_chunked_matches_unchunked():
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    batch = _batch_as_tensors(result["splits"]["train"])
+
+    unchunked = physics_loss(model, batch["collocation_X"], FAST_CONFIG, result["stats"]).item()
+    chunked = physics_loss_chunked(model, batch["collocation_X"], FAST_CONFIG, result["stats"], max_points_per_chunk=7)
+    assert chunked == pytest.approx(unchunked, abs=1e-5)
+
+
+def test_physics_loss_chunked_no_chunking_needed_matches_direct_call():
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    batch = _batch_as_tensors(result["splits"]["train"])
+
+    unchunked = physics_loss(model, batch["collocation_X"], FAST_CONFIG, result["stats"]).item()
+    chunked = physics_loss_chunked(model, batch["collocation_X"], FAST_CONFIG, result["stats"], max_points_per_chunk=1_000_000)
+    assert chunked == pytest.approx(unchunked, abs=1e-6)

@@ -4,10 +4,12 @@
 viability/cytotoxicity maps (with a three-zone overlay), the
 eta(d_NP,C0) treatment-effectiveness surface, the heterogeneous-vs-
 homogeneous profile comparison (H3), the ablation residual comparison (H5),
-PDE-residual histograms, PINN-vs-FDM overlays, and time-series concentration
-animations. Shared plotting primitives used by both scripts/make_figures.py
-(static PNG export) and scripts/run_evaluation.py / scripts/run_ablation.py,
-so there is exactly one implementation of each figure.
+PDE-residual histograms, PINN-vs-FDM overlays, time-series concentration
+animations, and a layer-by-layer BIOPINN architecture diagram. Shared
+plotting primitives used by both scripts/make_figures.py (static PNG
+export) and scripts/run_evaluation.py / scripts/run_ablation.py /
+scripts/visualize_architecture.py, so there is exactly one implementation
+of each figure.
 """
 
 from __future__ import annotations
@@ -291,3 +293,86 @@ def animate_concentration(
         plt.close(fig)
         return save_path
     return anim
+
+
+_ARCH_INPUT_LABELS = ("r_norm", "t_norm", "R_norm", "d_NP_norm", "C0_norm", "k_d_norm", "t_max_norm")
+_ARCH_MAX_NODES_SHOWN = 8
+_ARCH_COLORS = {"input": "#4C72B0", "fourier": "#8172B2", "dense": "#55A868", "output": "#C44E52"}
+
+
+def plot_architecture_diagram(config: dict, save_path: str | None = None):
+    """Layer-by-layer diagram of the BIOPINN MLP (src/model.py's exact
+    layer sequence), built entirely from config -- no trained checkpoint or
+    dataset needed. Layers wider than _ARCH_MAX_NODES_SHOWN are drawn with a
+    representative subset of nodes plus an ellipsis (drawing all real
+    neurons -- e.g. 64 -- and their edges would be an unreadable hairball,
+    not any more informative than the node count already printed in each
+    layer's label)."""
+    model_cfg = config["model"]
+    input_dim = model_cfg["input_dim"]
+    n_layers = model_cfg["n_layers"]
+    n_neurons = model_cfg["n_neurons"]
+    output_dim = model_cfg["output_dim"]
+    activation = model_cfg.get("activation", "tanh")
+    hard_ic = model_cfg.get("hard_ic_transform", True)
+    fourier_cfg = model_cfg.get("fourier_features", {})
+    use_fourier = fourier_cfg.get("enabled", False)
+
+    columns = [{"size": input_dim, "label": f"Input ({input_dim})", "kind": "input"}]
+    net_input_dim = input_dim
+    if use_fourier:
+        n_features = fourier_cfg["n_features"]
+        net_input_dim = 2 * n_features
+        columns.append({"size": net_input_dim, "label": f"Fourier features\n(2x{n_features}, fixed)", "kind": "fourier"})
+    for _ in range(n_layers):
+        columns.append({"size": n_neurons, "label": f"Dense({n_neurons})\n{activation}", "kind": "dense"})
+    out_label = f"Dense({output_dim})"
+    if hard_ic:
+        out_label += "\nsigmoid * t_norm\n(hard IC)"
+    columns.append({"size": output_dim, "label": out_label, "kind": "output"})
+
+    # Trainable parameter count: the Linear layers only (the Fourier projection
+    # matrix, if enabled, is a fixed random buffer -- see RandomFourierFeatures
+    # in src/model.py -- not a trained weight).
+    dense_sizes = [net_input_dim] + [n_neurons] * n_layers + [output_dim]
+    n_params = sum(dense_sizes[i] * dense_sizes[i + 1] + dense_sizes[i + 1] for i in range(len(dense_sizes) - 1))
+
+    fig, ax = plt.subplots(figsize=(max(10, 1.6 * len(columns)), 6))
+
+    node_positions = []
+    for col in columns:
+        shown = min(col["size"], _ARCH_MAX_NODES_SHOWN)
+        ys = np.linspace(-1, 1, shown) if shown > 1 else np.array([0.0])
+        node_positions.append(list(ys))
+
+    for col_idx in range(len(columns) - 1):
+        for y0 in node_positions[col_idx]:
+            for y1 in node_positions[col_idx + 1]:
+                ax.plot([col_idx, col_idx + 1], [y0, y1], color="gray", linewidth=0.4, alpha=0.5, zorder=1)
+
+    for col_idx, col in enumerate(columns):
+        color = _ARCH_COLORS[col["kind"]]
+        for y in node_positions[col_idx]:
+            ax.add_patch(plt.Circle((col_idx, y), 0.06, color=color, ec="black", linewidth=0.5, zorder=2))
+        if col["size"] > _ARCH_MAX_NODES_SHOWN:
+            ax.text(col_idx, 0, "...", ha="center", va="center", fontsize=14, zorder=3)
+        if col["kind"] == "input" and col["size"] <= len(_ARCH_INPUT_LABELS):
+            for y, name in zip(node_positions[col_idx], _ARCH_INPUT_LABELS[: col["size"]]):
+                ax.text(col_idx - 0.15, y, name, ha="right", va="center", fontsize=8)
+        if col["kind"] == "output" and col["size"] == 1:
+            ax.text(col_idx + 0.15, node_positions[col_idx][0], "C_norm", ha="left", va="center", fontsize=8)
+        ax.text(col_idx, -1.4, col["label"], ha="center", va="top", fontsize=9)
+
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markeredgecolor="black", markersize=8, label=k.capitalize())
+        for k, c in _ARCH_COLORS.items()
+        if any(col["kind"] == k for col in columns)
+    ]
+    ax.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, 1.02), ncol=len(legend_handles), frameon=False, fontsize=9)
+
+    ax.set_xlim(-0.8, len(columns) - 0.2)
+    ax.set_ylim(-2.0, 1.3)
+    ax.axis("off")
+    fig.suptitle(f"BIOPINN architecture -- {n_params:,} trainable parameters", fontsize=12, y=0.99)
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    return _save_or_return(fig, save_path)

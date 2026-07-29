@@ -1,20 +1,36 @@
 #!/usr/bin/env python3
-"""CLI: generate the full manuscript Results & Discussion asset pack.
+"""CLI: generate the full manuscript Results & Discussion asset pack, in APA
+(7th edition) style.
 
 Loads the trained checkpoint (+ optionally a w_phys=0 ablation baseline) and
-the held-out test set, computes every figure (Fig 4.1-4.10) and table
-(Table 4.1-4.9) via src/results.py, and writes them to results/paper/:
-  - fig_4_1_*.png / .pdf ... fig_4_10_*.png / .pdf   (300 DPI)
-  - table_4_1.csv ... table_4_9.csv
-  - BIOPINN_results_tables.docx                       (all 9 tables, captioned)
-  - results_manifest.json                             (source/config/key-values per asset)
+the held-out test set, computes every figure and table via src/results.py,
+and writes them to results/paper/:
+  - fig_*.png / .pdf   (300 DPI, 10 figures; no caption baked into the image --
+    APA figures carry data/axes/legend only, see FIGURE_CAPTIONS_<mode>.md)
+  - table_*.csv        (9 tables)
+  - BIOPINN_results_tables_<mode>.docx   (9 tables, APA three-line borders,
+    "Table N" + italicized title, "Note." footnotes)
+  - FIGURE_CAPTIONS_<mode>.md            (APA figure captions: "Figure N" +
+    italicized title, external to the image files themselves)
+  - results_manifest_<mode>.json         (source/config/key-values per asset)
+
+--numbering controls the caption/filename scheme (<mode> above):
+  - "chapter"    (default): dissertation-chapter-style, e.g. Table 4.1,
+    fig_4_1_concentration_heatmap.png -- identical to this script's original
+    numbering.
+  - "sequential": plain APA journal-article style, e.g. Table 1,
+    fig_1_concentration_heatmap.png. Figures and tables are numbered in
+    independent sequences (Figure 1..10, Table 1..9), per APA convention.
+Run the script twice, once per --numbering value, to get both -- filenames
+never collide between the two modes, so both can live in results/paper/
+at once.
 
 Never retrains -- consumes artifacts/ exactly as the other scripts/*.py do.
-Table 4.8 (ablation) is skipped with a clear note if no baseline checkpoint
+Table 8 (ablation) is skipped with a clear note if no baseline checkpoint
 is present (run scripts/run_ablation.py first to produce one).
 
 Usage:
-    python scripts/generate_results.py [--experiment NAME] [--n-jobs N]
+    python scripts/generate_results.py [--experiment NAME] [--n-jobs N] [--numbering {chapter,sequential}]
 """
 
 from __future__ import annotations
@@ -29,6 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import torch
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from src import results as R
@@ -38,6 +57,8 @@ from src.evaluate import evaluate_h2_hypothesis, resolve_test_simulations
 from src.microenvironment import radial_grid
 from src.model import load_checkpoint
 from src.optimize import optimize_all_radii, speedup_study
+
+APA_FONT = "Times New Roman"
 
 
 def _sanitize_for_json(obj):
@@ -61,30 +82,139 @@ def _sanitize_for_json(obj):
     return obj
 
 
-def _add_table_to_doc(doc: Document, number: str, caption: str, df, footnote: str | None = None) -> None:
-    doc.add_heading(f"Table {number} — {caption}", level=2)
+def _seq(chapter_number: str) -> str:
+    """'4.3' -> '3'. The chapter numbering (Fig/Table 4.1..4.N) is already
+    sequential within the chapter with no gaps, so the plain APA sequential
+    number is just this suffix -- no separate remapping table needed."""
+    return chapter_number.split(".")[1]
+
+
+def _display_number(chapter_number: str, numbering: str) -> str:
+    """The number shown in a caption/heading: 'Table 4.3' vs. 'Table 3'."""
+    return chapter_number if numbering == "chapter" else _seq(chapter_number)
+
+
+def _file_number(chapter_number: str, numbering: str) -> str:
+    """The number embedded in a filename: 'fig_4_3_...' vs. 'fig_3_...'."""
+    return chapter_number.replace(".", "_") if numbering == "chapter" else _seq(chapter_number)
+
+
+def _set_cell_border(cell, **edges) -> None:
+    """Low-level docx border control (python-docx has no high-level API for
+    per-edge table borders). Each kwarg is one of top/bottom/left/right,
+    valued with a dict of OOXML border attributes, e.g. {"val": "single",
+    "sz": 8, "color": "000000"} or {"val": "nil"} to remove that edge."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcBorders = tcPr.find(qn("w:tcBorders"))
+    if tcBorders is None:
+        tcBorders = OxmlElement("w:tcBorders")
+        tcPr.append(tcBorders)
+    for edge, attrs in edges.items():
+        edge_el = tcBorders.find(qn(f"w:{edge}"))
+        if edge_el is None:
+            edge_el = OxmlElement(f"w:{edge}")
+            tcBorders.append(edge_el)
+        for key, value in attrs.items():
+            edge_el.set(qn(f"w:{key}"), str(value))
+
+
+def _apply_apa_three_line_borders(table) -> None:
+    """APA 7 "three-line table" style (Publication Manual Table 7.7): no
+    vertical rules anywhere, and horizontal rules only above the header row,
+    below the header row, and below the final data row -- nothing else."""
+    NIL = {"val": "nil"}
+    RULE = {"val": "single", "sz": 8, "color": "000000"}
+    n_rows = len(table.rows)
+    for r_idx, row in enumerate(table.rows):
+        for cell in row.cells:
+            _set_cell_border(
+                cell,
+                left=NIL,
+                right=NIL,
+                top=RULE if r_idx == 0 else NIL,
+                bottom=RULE if r_idx in (0, n_rows - 1) else NIL,
+            )
+
+
+def _add_table_to_doc(doc: Document, display_number: str, caption: str, df, footnote: str | None = None) -> None:
+    """Write one APA-style table: bold 'Table N' on its own line, an
+    italicized title below it, a borderless three-line table (see
+    _apply_apa_three_line_borders), and an optional 'Note. ...' footnote
+    with only the 'Note.' label italicized, per APA 7 table conventions."""
+    number_para = doc.add_paragraph()
+    number_run = number_para.add_run(f"Table {display_number}")
+    number_run.bold = True
+    number_run.font.name = APA_FONT
+    number_run.font.size = Pt(12)
+
+    title_para = doc.add_paragraph()
+    title_run = title_para.add_run(caption)
+    title_run.italic = True
+    title_run.font.name = APA_FONT
+    title_run.font.size = Pt(12)
+
     table = doc.add_table(rows=1, cols=len(df.columns))
-    table.style = "Light Grid Accent 1"
     header_cells = table.rows[0].cells
     for i, col in enumerate(df.columns):
         header_cells[i].text = str(col)
+        header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in header_cells[i].paragraphs[0].runs:
-            run.font.bold = True
+            run.font.name = APA_FONT
+            run.font.size = Pt(11)
     for _, row in df.iterrows():
         cells = table.add_row().cells
         for i, value in enumerate(row):
             cells[i].text = f"{value:.4g}" if isinstance(value, float) else str(value)
+            cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in cells[i].paragraphs[0].runs:
+                run.font.name = APA_FONT
+                run.font.size = Pt(11)
+    _apply_apa_three_line_borders(table)
+
     if footnote:
-        note = doc.add_paragraph(footnote)
-        note.runs[0].font.size = Pt(9)
-        note.runs[0].font.italic = True
+        note = doc.add_paragraph()
+        label_run = note.add_run("Note. ")
+        label_run.italic = True
+        label_run.font.name = APA_FONT
+        label_run.font.size = Pt(10)
+        body_run = note.add_run(footnote)
+        body_run.font.name = APA_FONT
+        body_run.font.size = Pt(10)
     doc.add_paragraph()
+
+
+def _write_figure_captions(manifest_figures: dict, figure_order: list[str], numbering: str, output_dir: Path) -> Path:
+    """APA-style figure caption list (bold 'Figure N', italicized title)
+    as a standalone markdown file -- the figures themselves stay plain
+    PNG/PDF files with no caption baked in, so this is where the caption
+    text actually lives."""
+    lines = ["# BIOPINN Figure Captions (APA style)", ""]
+    for chapter_number in figure_order:
+        entry = manifest_figures[chapter_number]
+        png_name = Path(entry["files"]["png"]).name
+        pdf_name = Path(entry["files"]["pdf"]).name
+        lines.append(f"**Figure {entry['display_number']}**")
+        lines.append("")
+        lines.append(f"*{entry.get('caption', '')}*")
+        lines.append("")
+        lines.append(f"File: `{png_name}` / `{pdf_name}`")
+        lines.append("")
+    path = output_dir / f"FIGURE_CAPTIONS_{numbering}.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment", default=None, help="Experiment config name (default: default_config.yaml)")
     parser.add_argument("--n-jobs", type=int, default=1, help="Parallel workers for re-solving the test set's FDM reference")
+    parser.add_argument(
+        "--numbering",
+        choices=("chapter", "sequential"),
+        default="chapter",
+        help="Caption/filename numbering scheme: 'chapter' (Table 4.1, default, unchanged from before) "
+        "or 'sequential' (Table 1, plain APA journal-article style). Run once per value to get both.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.experiment)
@@ -131,46 +261,55 @@ def main() -> None:
 
     print("  Fig 4.1 -- spatiotemporal concentration heatmap")
     fig, meta = R.fig_4_1_concentration_heatmap(model, config, norm_stats)
-    manifest["figures"]["4.1"] = {"files": R._save_figure(fig, output_dir, "fig_4_1_concentration_heatmap"), **meta}
+    stem = f"fig_{_file_number('4.1', args.numbering)}_concentration_heatmap"
+    manifest["figures"]["4.1"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.1", args.numbering), **meta}
 
     print("  Fig 4.2 -- radial concentration profiles")
     fig, meta = R.fig_4_2_radial_profiles(model, config, norm_stats)
-    manifest["figures"]["4.2"] = {"files": R._save_figure(fig, output_dir, "fig_4_2_radial_concentration_profiles"), **meta}
+    stem = f"fig_{_file_number('4.2', args.numbering)}_radial_concentration_profiles"
+    manifest["figures"]["4.2"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.2", args.numbering), **meta}
 
     print("  solving the nanoparticle-diameter FDM sweep (shared by Table 4.1/4.2/4.4 and Fig 4.3)...")
     diameter_sweep = R.solve_diameter_sweep(config)
 
     print("  Fig 4.3 -- PINN vs. FDM comparison at t=24hr")
     fig, meta = R.fig_4_3_pinn_vs_fdm_t24(model, config, norm_stats, diameter_sweep=diameter_sweep)
-    manifest["figures"]["4.3"] = {"files": R._save_figure(fig, output_dir, "fig_4_3_pinn_vs_fdm_profile_comparison"), **meta}
+    stem = f"fig_{_file_number('4.3', args.numbering)}_pinn_vs_fdm_profile_comparison"
+    manifest["figures"]["4.3"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.3", args.numbering), **meta}
 
     print("  Fig 4.4 -- predicted vs. reference scatter (full test set)")
     fig, meta = R.fig_4_4_scatter_pred_vs_ref(model, config, norm_stats, sims)
-    manifest["figures"]["4.4"] = {"files": R._save_figure(fig, output_dir, "fig_4_4_predicted_vs_reference_scatter"), **meta}
+    stem = f"fig_{_file_number('4.4', args.numbering)}_predicted_vs_reference_scatter"
+    manifest["figures"]["4.4"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.4", args.numbering), **meta}
 
     print("  Fig 4.5 -- training loss convergence")
     history = R.load_training_history(config)
     fig, meta = R.fig_4_5_training_loss(history, config)
-    manifest["figures"]["4.5"] = {"files": R._save_figure(fig, output_dir, "fig_4_5_training_loss_convergence"), **meta}
+    stem = f"fig_{_file_number('4.5', args.numbering)}_training_loss_convergence"
+    manifest["figures"]["4.5"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.5", args.numbering), **meta}
 
     print("  Fig 4.6 -- penetration depth vs. time")
     fig, meta = R.fig_4_6_penetration_vs_time(model, config, norm_stats)
-    manifest["figures"]["4.6"] = {"files": R._save_figure(fig, output_dir, "fig_4_6_penetration_depth_vs_time"), **meta}
+    stem = f"fig_{_file_number('4.6', args.numbering)}_penetration_depth_vs_time"
+    manifest["figures"]["4.6"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.6", args.numbering), **meta}
 
     print("  Fig 4.7 -- spatial viability at t=72hr")
     fig, meta = R.fig_4_7_viability_t72(model, config, norm_stats)
-    manifest["figures"]["4.7"] = {"files": R._save_figure(fig, output_dir, "fig_4_7_spatial_viability"), **meta}
+    stem = f"fig_{_file_number('4.7', args.numbering)}_spatial_viability"
+    manifest["figures"]["4.7"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.7", args.numbering), **meta}
 
     print("  Fig 4.8 -- cytotoxicity evolution")
     fig, meta = R.fig_4_8_cytotoxicity_evolution(model, config, norm_stats)
-    manifest["figures"]["4.8"] = {"files": R._save_figure(fig, output_dir, "fig_4_8_cytotoxicity_evolution"), **meta}
+    stem = f"fig_{_file_number('4.8', args.numbering)}_cytotoxicity_evolution"
+    manifest["figures"]["4.8"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.8", args.numbering), **meta}
 
     print("  solving the heterogeneous/homogeneous D_eff comparison (shared by Table 4.6 and Fig 4.9)...")
     hetero_homog = R.solve_hetero_and_homogeneous(config)
 
     print("  Fig 4.9 -- heterogeneous vs. homogeneous D_eff")
     fig, meta = R.fig_4_9_hetero_vs_homog(config, solved=hetero_homog)
-    manifest["figures"]["4.9"] = {"files": R._save_figure(fig, output_dir, "fig_4_9_heterogeneous_vs_homogeneous"), **meta}
+    stem = f"fig_{_file_number('4.9', args.numbering)}_heterogeneous_vs_homogeneous"
+    manifest["figures"]["4.9"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.9", args.numbering), **meta}
 
     print("  running the grid search at the baseline radius (shared by Table 4.7 and Fig 4.10)...")
     radius_results = optimize_all_radii(model, config, norm_stats)
@@ -178,7 +317,8 @@ def main() -> None:
 
     print("  Fig 4.10 -- treatment effectiveness surface")
     fig, meta = R.fig_4_10_effectiveness_surface(model, config, norm_stats, grid_result=radius_results[baseline_R])
-    manifest["figures"]["4.10"] = {"files": R._save_figure(fig, output_dir, "fig_4_10_effectiveness_surface"), **meta}
+    stem = f"fig_{_file_number('4.10', args.numbering)}_effectiveness_surface"
+    manifest["figures"]["4.10"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.10", args.numbering), **meta}
 
     # ----------------------------------------------------------------- #
     # Tables
@@ -217,8 +357,9 @@ def main() -> None:
         if result is None:
             continue
         df, meta = result
-        df.to_csv(output_dir / f"table_4_{number.split('.')[1]}.csv", index=False, encoding="utf-8")
-        manifest["tables"][number] = {"csv": str(output_dir / f"table_4_{number.split('.')[1]}.csv"), **meta}
+        csv_path = output_dir / f"table_{_file_number(number, args.numbering)}.csv"
+        df.to_csv(csv_path, index=False, encoding="utf-8")
+        manifest["tables"][number] = {"csv": str(csv_path), "display_number": _display_number(number, args.numbering), **meta}
 
     # ----------------------------------------------------------------- #
     # Hypothesis summary (Table 4.9) -- assembled from the tables/figures above
@@ -277,20 +418,24 @@ def main() -> None:
         },
     }
     table_4_9 = R.table_4_9_hypothesis_summary(hypotheses)
-    table_4_9.to_csv(output_dir / "table_4_9.csv", index=False, encoding="utf-8")
-    manifest["tables"]["4.9"] = {"csv": str(output_dir / "table_4_9.csv"), "hypotheses": hypotheses}
+    table_4_9_csv_path = output_dir / f"table_{_file_number('4.9', args.numbering)}.csv"
+    table_4_9.to_csv(table_4_9_csv_path, index=False, encoding="utf-8")
+    manifest["tables"]["4.9"] = {"csv": str(table_4_9_csv_path), "display_number": _display_number("4.9", args.numbering), "hypotheses": hypotheses}
 
     # ----------------------------------------------------------------- #
-    # Compiled Word document
+    # Compiled Word document (APA-style tables: bold "Table N", italicized
+    # title, borderless three-line table, "Note." footnotes -- see
+    # _add_table_to_doc)
     # ----------------------------------------------------------------- #
-    print("\nCompiling BIOPINN_results_tables.docx...")
+    docx_path = output_dir / f"BIOPINN_results_tables_{args.numbering}.docx"
+    print(f"\nCompiling {docx_path.name}...")
     doc = Document()
     doc.add_heading("BIOPINN — Results & Discussion: Tables", level=1)
     doc.add_paragraph(
         f"Every value in this document was computed from the trained checkpoint, the held-out "
         f"{len(sims)}-simulation test set, and the analysis routines in src/ -- see "
-        f"results_manifest.json in this folder for the exact source and configuration behind "
-        f"every number."
+        f"results_manifest_{args.numbering}.json in this folder for the exact source and "
+        f"configuration behind every number."
     )
 
     order = [
@@ -305,27 +450,42 @@ def main() -> None:
         ("4.9", "Hypothesis Evaluation Summary"),
     ]
     for number, caption in order:
+        display_number = _display_number(number, args.numbering)
         if number == "4.8" and tables["4.8"] is None:
-            doc.add_heading(f"Table {number} — {caption}", level=2)
+            missing_para = doc.add_paragraph()
+            missing_run = missing_para.add_run(f"Table {display_number}")
+            missing_run.bold = True
+            missing_run.font.name = APA_FONT
+            title_para = doc.add_paragraph()
+            title_run = title_para.add_run(caption)
+            title_run.italic = True
+            title_run.font.name = APA_FONT
             doc.add_paragraph("Unavailable: no ablation baseline checkpoint found. Run scripts/run_ablation.py first.")
             continue
         df = table_4_9 if number == "4.9" else tables[number][0]
         footnote = None
         if number == "4.8":
             footnote = f"Wilcoxon signed-rank test (baseline residuals > BIOPINN residuals): p = {tables['4.8'][1]['wilcoxon_p_value']:.3e}"
-        _add_table_to_doc(doc, number, caption, df, footnote=footnote)
+        _add_table_to_doc(doc, display_number, caption, df, footnote=footnote)
 
-    docx_path = output_dir / "BIOPINN_results_tables.docx"
     doc.save(docx_path)
     print(f"  saved {docx_path}")
 
     # ----------------------------------------------------------------- #
+    # Figure captions (APA style, external to the images -- see
+    # _write_figure_captions)
+    # ----------------------------------------------------------------- #
+    figure_order = ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9", "4.10"]
+    captions_path = _write_figure_captions(manifest["figures"], figure_order, args.numbering, output_dir)
+    print(f"  saved {captions_path}")
+
+    # ----------------------------------------------------------------- #
     # Manifest
     # ----------------------------------------------------------------- #
-    manifest_path = output_dir / "results_manifest.json"
+    manifest_path = output_dir / f"results_manifest_{args.numbering}.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(_sanitize_for_json(manifest), f, indent=2)
-    print(f"\nSaved 10 figures (PNG+PDF), 9 tables (CSV), the compiled docx, and results_manifest.json to {output_dir}")
+    print(f"\nSaved 10 figures (PNG+PDF), 9 tables (CSV), {docx_path.name}, {captions_path.name}, and {manifest_path.name} to {output_dir}")
 
     print("\n--- Hypothesis summary ---")
     for key, h in hypotheses.items():

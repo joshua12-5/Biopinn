@@ -13,9 +13,11 @@ import numpy as np
 import pytest
 
 from src.config import load_config
+from src.model import BIOPINN
 from src.visualize import (
     animate_concentration,
     plot_ablation_comparison,
+    plot_architecture_diagram,
     plot_concentration_heatmap,
     plot_cytotoxicity_map,
     plot_effectiveness_surface,
@@ -177,4 +179,48 @@ def test_animate_concentration_saves_gif(tmp_path):
     save_path = tmp_path / "concentration.gif"
     result = animate_concentration(C_rt, R, T, CONFIG, save_path=str(save_path), fps=5, n_frames=5)
     assert result == str(save_path)
+    _assert_saved_file(save_path)
+
+
+def test_plot_architecture_diagram(tmp_path):
+    fig = plot_architecture_diagram(CONFIG)
+    assert isinstance(fig, matplotlib.figure.Figure)
+
+    save_path = tmp_path / "architecture.png"
+    result = plot_architecture_diagram(CONFIG, save_path=str(save_path))
+    assert result == str(save_path)
+    _assert_saved_file(save_path)
+
+
+def test_plot_architecture_diagram_param_count_matches_real_model():
+    """The trainable-parameter count in the diagram's title must match a real
+    BIOPINN(CONFIG) instance's actual parameter count -- catches any drift
+    between src/model.py's layer construction and this diagram's layer-size
+    bookkeeping."""
+    model = BIOPINN(CONFIG)
+    actual_n_params = sum(p.numel() for p in model.parameters())
+
+    fig = plot_architecture_diagram(CONFIG)
+    title_text = fig._suptitle.get_text()
+    reported_n_params = int(title_text.split("--")[1].split("trainable")[0].replace(",", "").strip())
+
+    assert reported_n_params == actual_n_params
+
+
+def test_plot_architecture_diagram_with_fourier_features(tmp_path):
+    import copy
+
+    config = copy.deepcopy(CONFIG)
+    config["model"]["fourier_features"] = {"enabled": True, "n_features": 16, "sigma": 1.0}
+
+    model = BIOPINN(config)
+    actual_n_params = sum(p.numel() for p in model.parameters())
+
+    fig = plot_architecture_diagram(config)
+    title_text = fig._suptitle.get_text()
+    reported_n_params = int(title_text.split("--")[1].split("trainable")[0].replace(",", "").strip())
+    assert reported_n_params == actual_n_params
+
+    save_path = tmp_path / "architecture_fourier.png"
+    plot_architecture_diagram(config, save_path=str(save_path))
     _assert_saved_file(save_path)
