@@ -11,12 +11,16 @@ import json
 import numpy as np
 import torch
 
+import pytest
+
 from src.config import load_config
 from src.data_pipeline import build_dataset
 from src.model import BIOPINN, load_checkpoint
 from src.train import (
     HISTORY_KEYS,
+    load_training_checkpoint,
     save_checkpoint,
+    save_training_checkpoint,
     to_tensors,
     train,
     train_adam_phase,
@@ -198,6 +202,124 @@ def test_train_adam_phase_with_chunking_survives_nan_batch_without_raising():
     assert adam_result["history"]["total"] == []
     for p in model.parameters():
         assert torch.all(torch.isfinite(p))
+
+
+def test_train_adam_phase_resume_matches_uninterrupted_run(tmp_path):
+    """The whole point of resumable checkpointing is that it doesn't change
+    what gets learned, only how much progress a disconnect can lose. Adam's
+    updates are deterministic given the same starting weights, optimizer
+    momentum state, and gradients -- so splitting a 10-epoch run into 5
+    epochs (save) + resume for 5 more must produce parameters bit-identical
+    to a single uninterrupted 10-epoch run, if (and only if) resume is
+    restoring the optimizer/scheduler state correctly and not just the model
+    weights. The second half deliberately starts from a differently-seeded
+    model to prove the checkpoint itself carries everything needed, rather
+    than relying on the model object happening to already hold the right
+    state."""
+    result = _dataset()
+    train_batch = to_tensors(result["splits"]["train"])
+    val_batch = to_tensors(result["splits"]["val"])
+
+    config = copy.deepcopy(FAST_CONFIG)
+    config["training"]["adam"]["iters"] = 10
+
+    torch.manual_seed(0)
+    model_straight = BIOPINN(config)
+    straight_result = train_adam_phase(model_straight, train_batch, val_batch, config, result["stats"], log_every=0)
+
+    checkpoint_path = tmp_path / "resume.pt"
+    config_part1 = copy.deepcopy(config)
+    config_part1["training"]["adam"]["iters"] = 5
+
+    torch.manual_seed(0)
+    model_part1 = BIOPINN(config)
+    train_adam_phase(
+        model_part1, train_batch, val_batch, config_part1, result["stats"], log_every=0,
+        checkpoint_path=checkpoint_path, checkpoint_every=1,
+    )
+    assert checkpoint_path.exists()
+
+    torch.manual_seed(123)  # deliberately different init than model_straight/model_part1
+    model_part2 = BIOPINN(config)
+    split_result = train_adam_phase(
+        model_part2, train_batch, val_batch, config, result["stats"], log_every=0,
+        checkpoint_path=checkpoint_path, checkpoint_every=1,
+    )
+
+    assert straight_result["epochs_run"] == 10
+    assert split_result["epochs_run"] == 10
+    for p_straight, p_split in zip(model_straight.parameters(), model_part2.parameters()):
+        assert torch.equal(p_straight, p_split)
+    assert straight_result["history"]["total"] == pytest.approx(split_result["history"]["total"])
+
+
+def test_load_training_checkpoint_raises_on_config_mismatch(tmp_path):
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
+    checkpoint_path = tmp_path / "resume.pt"
+
+    save_training_checkpoint(
+        checkpoint_path, model, optimizer, scheduler, epoch=3,
+        best_val_score=1.0, best_state=model.state_dict(), patience_counter=0,
+        history={k: [] for k in HISTORY_KEYS}, ramp_state={"active": False}, config=FAST_CONFIG,
+    )
+
+    mismatched_config = copy.deepcopy(FAST_CONFIG)
+    mismatched_config["dataset"]["n_simulations"] = 999999
+
+    with pytest.raises(ValueError, match="doesn't match the current config"):
+        load_training_checkpoint(checkpoint_path, mismatched_config)
+
+
+def test_train_resumes_automatically_and_cleans_up_resume_file(tmp_path):
+    """End-to-end through the public train() entry point. train() always
+    runs to completion (or convergence) and cleans up its resume file
+    afterward, so calling it with a shorter adam.iters wouldn't simulate an
+    interruption -- it'd just be a complete short run. Instead, simulate a
+    real mid-run kill directly: call train_adam_phase on its own and stop
+    it short of the intended budget, leaving a checkpoint on disk exactly
+    like a killed process would (train()'s end-of-run cleanup never gets a
+    chance to run). Then call the real train() with the full budget and
+    confirm it picks up from that checkpoint automatically and deletes it
+    once the full run (both phases) actually completes."""
+    import src.config as cfg_module
+    from src.config import resolve_path
+
+    config = copy.deepcopy(FAST_CONFIG)
+    config["paths"] = dict(config["paths"])
+    config["training"] = copy.deepcopy(config["training"])
+    config["training"]["checkpoint_every"] = 1
+    config["training"]["adam"]["iters"] = 10
+
+    original_root = cfg_module.REPO_ROOT
+    try:
+        cfg_module.REPO_ROOT = tmp_path
+        config["paths"]["model_checkpoint"] = "artifacts/biopinn_model.pt"
+        config["paths"]["normalization_stats"] = "artifacts/normalization_stats.json"
+
+        dataset = build_dataset(config, seed=9, save=False)
+        train_batch = to_tensors(dataset["splits"]["train"])
+        val_batch = to_tensors(dataset["splits"]["val"])
+
+        model_checkpoint_path = resolve_path(config, "model_checkpoint")
+        resume_path = model_checkpoint_path.with_name(model_checkpoint_path.stem + "_resume" + model_checkpoint_path.suffix)
+
+        interrupted_model = BIOPINN(config)
+        short_config = copy.deepcopy(config)
+        short_config["training"]["adam"]["iters"] = 4
+        train_adam_phase(
+            interrupted_model, train_batch, val_batch, short_config, dataset["stats"], log_every=0,
+            checkpoint_path=resume_path, checkpoint_every=1,
+        )
+        assert resume_path.exists(), "interrupted run should have left a resume checkpoint behind"
+
+        full_result = train(config, dataset, save=True)
+        assert full_result["adam_epochs_run"] == 10
+        assert not resume_path.exists(), "resume checkpoint should be cleaned up after a full completion"
+    finally:
+        cfg_module.REPO_ROOT = original_root
 
 
 def test_save_and_load_checkpoint_round_trip(tmp_path):

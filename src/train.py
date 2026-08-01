@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -33,6 +34,82 @@ from src.losses import composite_loss, composite_loss_chunked, data_loss, physic
 from src.model import BIOPINN
 
 HISTORY_KEYS = ("total", "data", "phys", "bc", "neu", "ic")
+
+
+def _resume_fingerprint(config: dict) -> dict:
+    """Config fields that must match between a training checkpoint and the run
+    resuming it. The checkpoint's optimizer/scheduler state (momentum
+    buffers, LR schedule position) is only meaningful for the exact dataset
+    size and architecture it was computed against -- resuming with a
+    different one wouldn't just be wrong, it would silently corrupt training
+    rather than continue it. training.adam.iters is deliberately NOT
+    included: it's just this call's loop bound, not a state-compatibility
+    requirement -- extending or shortening the remaining budget on resume
+    (e.g. deciding partway through that 20,000 iterations should really be
+    15,000) is a legitimate, supported thing to do."""
+    return {
+        "n_simulations": config["dataset"]["n_simulations"],
+        "n_layers": config["model"]["n_layers"],
+        "n_neurons": config["model"]["n_neurons"],
+    }
+
+
+def save_training_checkpoint(
+    path: Path | str,
+    model: BIOPINN,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    epoch: int,
+    best_val_score: float,
+    best_state: dict,
+    patience_counter: int,
+    history: dict,
+    ramp_state: dict,
+    config: dict,
+) -> None:
+    """Save everything needed to resume train_adam_phase from immediately
+    after `epoch` -- not just the model weights, but the optimizer's Adam
+    momentum buffers and the LR scheduler's step count too, so a resumed run
+    continues with the exact same optimization trajectory a single
+    uninterrupted run would have taken, rather than restarting Adam with a
+    cold optimizer partway through training."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "fingerprint": _resume_fingerprint(config),
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "epoch": epoch,
+        "best_val_score": best_val_score,
+        "best_state": best_state,
+        "patience_counter": patience_counter,
+        "history": history,
+        "ramp_state": ramp_state,
+    }
+    # Write to a temp file and rename over the old checkpoint atomically, so a
+    # crash/disconnect mid-save can never leave a half-written, unloadable
+    # checkpoint behind -- the previous good one stays intact until the new
+    # one has fully landed on disk.
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(path)
+
+
+def load_training_checkpoint(path: Path | str, config: dict, device: str = "cpu") -> dict:
+    """Load a checkpoint saved by save_training_checkpoint, after verifying
+    it was produced by a compatible config (see _resume_fingerprint) --
+    raises rather than silently resuming into a mismatched run."""
+    checkpoint = torch.load(Path(path), map_location=device)
+    expected = _resume_fingerprint(config)
+    if checkpoint["fingerprint"] != expected:
+        raise ValueError(
+            f"Training checkpoint at {path} doesn't match the current config "
+            f"(checkpoint: {checkpoint['fingerprint']}, current: {expected}) -- "
+            "refusing to resume from a mismatched run. Delete the checkpoint file "
+            "to start fresh, or fix the config to match what generated it."
+        )
+    return checkpoint
 
 
 def to_tensors(split_tensors: dict, device: str = "cpu") -> dict:
@@ -64,9 +141,24 @@ def train_adam_phase(
     config: dict,
     norm_stats: dict,
     log_every: int = 1,
+    checkpoint_path: Path | str | None = None,
+    checkpoint_every: int = 0,
 ) -> dict:
     """Run Phase-1 Adam optimization. Returns a dict with loss history and the
-    best-validation model state (also left loaded into `model`)."""
+    best-validation model state (also left loaded into `model`).
+
+    If `checkpoint_path` is given and a checkpoint already exists there
+    (from a previous, interrupted run of this exact function against a
+    compatible config -- see _resume_fingerprint), this resumes from
+    immediately after the saved epoch: model weights, Adam's momentum
+    buffers, the LR scheduler's step count, best-validation tracking,
+    patience counter, and loss history are all restored, so the resumed run
+    continues the same optimization trajectory an uninterrupted run would
+    have taken. If `checkpoint_every` is also set (> 0), a checkpoint is
+    saved every that-many epochs (and once more at the end of the phase),
+    so a disconnect loses at most `checkpoint_every` epochs of progress
+    instead of the whole run.
+    """
     adam_cfg = config["training"]["adam"]
     conv_cfg = config["training"]["convergence"]
     nan_cfg = config["training"]["nan_recovery"]
@@ -96,14 +188,36 @@ def train_adam_phase(
         "steps": max(ramp_cfg.get("ramp_steps", 5000), 1),
     }
 
+    start_epoch = 0
+    if checkpoint_path is not None and Path(checkpoint_path).exists():
+        device = next(model.parameters()).device
+        checkpoint = load_training_checkpoint(checkpoint_path, config, device=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        best_val_score = checkpoint["best_val_score"]
+        best_state = checkpoint["best_state"]
+        patience_counter = checkpoint["patience_counter"]
+        history = checkpoint["history"]
+        ramp_state.update(checkpoint["ramp_state"])
+        print(f"[adam] resumed from checkpoint at epoch {checkpoint['epoch']} ({checkpoint_path})")
+
     def current_w_phys(epoch: int) -> float | None:
         if not ramp_state["active"]:
             return None
         frac = min(1.0, (epoch - ramp_state["start_epoch"]) / ramp_state["steps"])
         return ramp_state["start_w"] + (ramp_state["end_w"] - ramp_state["start_w"]) * frac
 
-    epoch = 0
-    for epoch in range(adam_cfg["iters"]):
+    def save_checkpoint_now(at_epoch: int) -> None:
+        if checkpoint_path is not None:
+            save_training_checkpoint(
+                checkpoint_path, model, optimizer, scheduler, at_epoch,
+                best_val_score, best_state, patience_counter, history, ramp_state, config,
+            )
+
+    epoch = start_epoch - 1
+    for epoch in range(start_epoch, adam_cfg["iters"]):
         w_phys = current_w_phys(epoch)
         weight_overrides = {"w_phys": w_phys} if w_phys is not None else None
 
@@ -155,6 +269,9 @@ def train_adam_phase(
         )
         patience_counter = patience_counter + 1 if converged_this_epoch else 0
 
+        if checkpoint_every and epoch % checkpoint_every == 0:
+            save_checkpoint_now(epoch)
+
         if log_every and epoch % log_every == 0:
             print(
                 f"[adam] epoch {epoch:6d} | total {total.item():.4e} | "
@@ -170,6 +287,13 @@ def train_adam_phase(
                 f"{conv_cfg['patience_epochs']} consecutive epochs"
             )
             break
+
+    # Always save once more at the end -- whether the loop broke early on
+    # convergence or ran out its full iteration budget -- so a resume after
+    # a clean finish (e.g. to redo L-BFGS after that phase specifically was
+    # interrupted) picks up from the true final state, not a stale periodic
+    # snapshot from up to checkpoint_every epochs earlier.
+    save_checkpoint_now(epoch)
 
     model.load_state_dict(best_state)
     return {"history": history, "best_state": best_state, "epochs_run": epoch + 1}
@@ -268,6 +392,16 @@ def train(config: dict, dataset: dict, device: str = "cpu", save: bool = True) -
         save: if True, saves the best checkpoint + normalization stats via
             save_checkpoint().
 
+    If config["training"]["checkpoint_every"] is set (> 0), the Adam phase
+    periodically saves a resumable checkpoint to
+    "<model_checkpoint>_resume.pt" -- if that file already exists when
+    train() is called again (e.g. after a Colab disconnect), Adam resumes
+    from it automatically instead of restarting from epoch 0, restoring the
+    optimizer's momentum state and LR schedule position along with the
+    model weights. The resume file is deleted once training fully completes
+    (both phases), so a later fresh call to train() doesn't accidentally
+    pick up a stale finished run's state.
+
     Returns a dict with the trained model, combined loss history, and (if
     save=True) the artifact paths written.
     """
@@ -277,7 +411,19 @@ def train(config: dict, dataset: dict, device: str = "cpu", save: bool = True) -
 
     model = BIOPINN(config).to(device)
 
-    adam_result = train_adam_phase(model, train_batch, val_batch, config, norm_stats)
+    # Resume checkpointing is a disk side effect, so it respects `save` the
+    # same way the final artifact write does -- a save=False (dry-run) call
+    # shouldn't leave files behind either.
+    checkpoint_every = config["training"].get("checkpoint_every", 0) if save else 0
+    resume_path = None
+    if checkpoint_every:
+        model_checkpoint_path = resolve_path(config, "model_checkpoint")
+        resume_path = model_checkpoint_path.with_name(model_checkpoint_path.stem + "_resume" + model_checkpoint_path.suffix)
+
+    adam_result = train_adam_phase(
+        model, train_batch, val_batch, config, norm_stats,
+        checkpoint_path=resume_path, checkpoint_every=checkpoint_every,
+    )
     lbfgs_result = train_lbfgs_phase(model, train_batch, val_batch, config, norm_stats)
 
     combined_history = {k: adam_result["history"][k] + lbfgs_result["history"][k] for k in HISTORY_KEYS}
@@ -295,5 +441,8 @@ def train(config: dict, dataset: dict, device: str = "cpu", save: bool = True) -
 
     if save:
         result["artifacts"] = save_checkpoint(model, config, norm_stats)
+
+    if resume_path is not None and resume_path.exists():
+        resume_path.unlink()
 
     return result

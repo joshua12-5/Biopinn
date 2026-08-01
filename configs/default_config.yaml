@@ -150,6 +150,17 @@ training:
   # overhead, or comment it out entirely to restore the original
   # single-shot behavior on a GPU with enough VRAM to not need it.
   max_points_per_chunk: 1000000
+  # Colab sessions can disconnect well before training finishes (24h nominal
+  # cap, sometimes much sooner in practice) with no way to resume otherwise --
+  # src/train.py::train() saves a resumable checkpoint (model weights +
+  # Adam's momentum buffers + LR schedule position, not just the model) to
+  # "<model_checkpoint>_resume.pt" every this-many epochs during the Adam
+  # phase, and picks it back up automatically if that file already exists
+  # the next time train() is called. 0 disables it. 100 is roughly every
+  # 10 minutes at this config's measured per-epoch cost -- lower it for
+  # tighter loss-bound-on-disconnect at the cost of more frequent (cheap)
+  # disk writes, or raise it if you'd rather minimize I/O.
+  checkpoint_every: 100
   adam:
     iters: 20000
     lr: 1.0e-3

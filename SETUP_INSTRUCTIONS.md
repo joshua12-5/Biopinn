@@ -176,12 +176,17 @@ You have two ways to get the code onto Colab — pick one.
    small few-minute sanity version of the whole pipeline — good for
    confirming everything works before committing to a long run. Set it to
    `False` and re-run for the real, full-scale run (2,000 simulated
-   tumors; budget roughly 1–3.5 hours total on a T4, mostly data
-   generation). Free Colab sessions cap out around 12 hours with no
-   built-in resume, so if a run might exceed that, either use Colab Pro,
-   generate the dataset locally first (see "Training locally instead of
-   Colab" below) and upload it, or reduce `n_simulations` in
-   `configs/default_config.yaml`.
+   tumors; budget roughly 1–3.5 hours for data generation, plus the
+   training schedule on top — see the training cell's own time estimate).
+   Free Colab sessions cap out around 12 hours (Pro/Pro+ up to 24, though
+   real-world disconnects can happen sooner than that). **Data generation**
+   has no resume -- a disconnect mid-generation loses that progress, so
+   either use Colab Pro, generate the dataset locally first (see "Training
+   locally instead of Colab" below) and upload it, or reduce
+   `n_simulations` in `configs/default_config.yaml` to something that
+   reliably finishes within one session. **Training itself now resumes
+   automatically** (see the training cell's own note) -- a disconnect there
+   just needs you to reconnect and re-run the cell, not start over.
 5. When it finishes, it has saved everything to
    `My Drive/BIOPINN_outputs/` (the `DRIVE_OUTPUT_DIR` variable in the same
    cell as `QUICK_TEST`, change it there if you want a different location):
