@@ -63,7 +63,7 @@ def train_adam_phase(
     val_batch: dict,
     config: dict,
     norm_stats: dict,
-    log_every: int = 1000,
+    log_every: int = 1,
 ) -> dict:
     """Run Phase-1 Adam optimization. Returns a dict with loss history and the
     best-validation model state (also left loaded into `model`)."""
@@ -181,7 +181,7 @@ def train_lbfgs_phase(
     val_batch: dict,
     config: dict,
     norm_stats: dict,
-    log_every: int = 100,
+    log_every: int = 1,
 ) -> dict:
     """Run Phase-2 L-BFGS fine-tuning from the current (Adam-trained) state.
 

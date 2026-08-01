@@ -500,16 +500,17 @@ and want marginally less looping overhead, raise it, or delete the key
 entirely to restore the original single-shot behavior.
 
 **Training looks stuck -- no output for a very long time**
-This is almost always the logging interval, not a hang. `train_adam_phase`
-only prints every `log_every` epochs (1,000 by default) -- full-batch
-training's real per-epoch cost is dominated by the physics/collocation
-term, so at even a fairly fast rate, 1,000 epochs can genuinely take hours
-between printed lines. Two ways to tell the difference from an actual hang:
-check `nvidia-smi` (or Colab's resource panel) for GPU memory usage -- if
-it's non-zero and stable, something is actively running, even if nothing
-has printed yet. If you want more frequent reassurance, lower `log_every`
-(passed to `train_adam_phase`/`train_lbfgs_phase`, or edit their default in
-`src/train.py`) to something like 10-50. `configs/default_config.yaml`'s
+`train_adam_phase`/`train_lbfgs_phase` now print every single epoch/closure
+by default (`log_every=1`), specifically so this doesn't happen -- if you're
+not seeing a new line every few seconds, something is genuinely off rather
+than just a sparse logging interval. Check `nvidia-smi` (or Colab's resource
+panel, or Task Manager if training locally) for GPU/CPU utilization -- if
+it's non-zero and stable, it's still actively working, just slower than
+expected (e.g. a weaker local GPU); if it's near zero, that's a real hang
+worth investigating rather than waiting out. If you want *less* console
+noise instead (25,000 lines is a lot to scroll through), raise `log_every`
+back up when calling `train_adam_phase`/`train_lbfgs_phase` directly, or
+edit their default in `src/train.py`. `configs/default_config.yaml`'s
 `dataset.n_simulations: 2000` (scaled down from an earlier 10,000-sim
 default specifically because full-batch training at that scale could take
 ~97 hours worst-case, past any single Colab session) should already keep a
