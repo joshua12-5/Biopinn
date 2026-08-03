@@ -178,6 +178,35 @@ def test_train_lbfgs_phase_with_forced_multi_chunk_runs_and_returns_finite_histo
         assert torch.all(torch.isfinite(p))
 
 
+def test_train_lbfgs_phase_never_regresses_below_pre_phase_validation_score():
+    """L-BFGS's line search can wander through many closures with no
+    guarantee the last one generalizes best -- this proves the phase always
+    leaves the model at least as good, by validation score, as it started:
+    it must track and restore the best-scoring state seen, not just
+    whatever L-BFGS happened to end on."""
+    from src.train import _evaluate_validation
+
+    result = _dataset()
+    model = BIOPINN(FAST_CONFIG)
+    train_batch = to_tensors(result["splits"]["train"])
+    val_batch = to_tensors(result["splits"]["val"])
+
+    train_adam_phase(model, train_batch, val_batch, FAST_CONFIG, result["stats"], log_every=0)
+    pre_val_data, pre_val_phys = _evaluate_validation(model, val_batch, FAST_CONFIG, result["stats"])
+    pre_score = pre_val_data + pre_val_phys
+
+    lbfgs_result = train_lbfgs_phase(model, train_batch, val_batch, FAST_CONFIG, result["stats"], log_every=0)
+
+    assert lbfgs_result["val_data"] + lbfgs_result["val_phys"] <= pre_score + 1e-6
+    assert len(lbfgs_result["history"]["val_data"]) == lbfgs_result["closure_evaluations"]
+    assert len(lbfgs_result["history"]["val_phys"]) == lbfgs_result["closure_evaluations"]
+
+    # The model left loaded is the best-scoring state, not just the final closure's.
+    post_val_data, post_val_phys = _evaluate_validation(model, val_batch, FAST_CONFIG, result["stats"])
+    assert post_val_data == pytest.approx(lbfgs_result["val_data"])
+    assert post_val_phys == pytest.approx(lbfgs_result["val_phys"])
+
+
 def test_train_adam_phase_with_chunking_survives_nan_batch_without_raising():
     """Same as test_train_adam_phase_survives_nan_batch_without_raising, but
     through the chunked path -- confirms backward-as-you-go chunking doesn't

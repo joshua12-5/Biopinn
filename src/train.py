@@ -312,11 +312,22 @@ def train_lbfgs_phase(
     Returns a dict with per-closure-evaluation loss history and final
     validation losses. Reverts to the pre-L-BFGS state if the optimizer
     diverges to a non-finite loss.
+
+    L-BFGS's line search can evaluate many closures per optimizer.step(),
+    and nothing about it guarantees the very last closure is the
+    best-generalizing one -- unlike the Adam phase, which already tracks
+    and restores the best validation-scored state instead of just whatever
+    epoch happened to run last. This mirrors that: every closure call also
+    evaluates val_data/val_phys, and the model is left at whichever state
+    (pre-L-BFGS or any point during L-BFGS) had the lowest val_data +
+    val_phys, so L-BFGS can only improve on the Adam phase's result, never
+    quietly regress it.
     """
     lbfgs_cfg = config["training"]["lbfgs"]
     max_points_per_chunk = config["training"].get("max_points_per_chunk")
 
     pre_lbfgs_state = copy.deepcopy(model.state_dict())
+    pre_val_data, pre_val_phys = _evaluate_validation(model, val_batch, config, norm_stats)
 
     optimizer = torch.optim.LBFGS(
         model.parameters(),
@@ -327,8 +338,14 @@ def train_lbfgs_phase(
         tolerance_change=lbfgs_cfg["tolerance_change"],
     )
 
-    history = {k: [] for k in HISTORY_KEYS}
+    history = {k: [] for k in HISTORY_KEYS} | {"val_data": [], "val_phys": []}
     call_count = {"n": 0}
+    best = {
+        "state": pre_lbfgs_state,
+        "score": pre_val_data + pre_val_phys,
+        "val_data": pre_val_data,
+        "val_phys": pre_val_phys,
+    }
 
     def closure():
         optimizer.zero_grad()
@@ -340,22 +357,35 @@ def train_lbfgs_phase(
         for k in HISTORY_KEYS:
             history[k].append(losses[k].item())
         call_count["n"] += 1
+
+        val_data, val_phys = _evaluate_validation(model, val_batch, config, norm_stats)
+        history["val_data"].append(val_data)
+        history["val_phys"].append(val_phys)
+        val_score = val_data + val_phys
+        if np.isfinite(val_score) and val_score < best["score"]:
+            best.update(state=copy.deepcopy(model.state_dict()), score=val_score, val_data=val_data, val_phys=val_phys)
+
         if log_every and call_count["n"] % log_every == 0:
-            print(f"[lbfgs] closure {call_count['n']:5d} | total {losses['total'].item():.4e}")
+            print(
+                f"[lbfgs] closure {call_count['n']:5d} | total {losses['total'].item():.4e} | "
+                f"val_data {val_data:.4e} | val_phys {val_phys:.4e}"
+            )
         return losses["total"]
 
     optimizer.step(closure)
 
     final_total = history["total"][-1] if history["total"] else None
     if final_total is not None and not np.isfinite(final_total):
-        print("[lbfgs] diverged to a non-finite loss; reverting to the pre-L-BFGS state.")
-        model.load_state_dict(pre_lbfgs_state)
+        print("[lbfgs] diverged to a non-finite loss; reverting to the best validated state.")
 
-    val_data, val_phys = _evaluate_validation(model, val_batch, config, norm_stats)
+    model.load_state_dict(best["state"])
+    if best["state"] is pre_lbfgs_state:
+        print("[lbfgs] no closure improved on the pre-L-BFGS validation score; keeping the Adam-phase result.")
+
     return {
         "history": history,
-        "val_data": val_data,
-        "val_phys": val_phys,
+        "val_data": best["val_data"],
+        "val_phys": best["val_phys"],
         "closure_evaluations": call_count["n"],
     }
 
