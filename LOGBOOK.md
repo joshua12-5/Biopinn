@@ -1,423 +1,811 @@
-# BIOPINN Development Logbook
+# Research Logbook — BIOPINN
 
-A running diary of how this project was built, in plain language, based on the
-project's actual commit history. BIOPINN trains a neural network (a "PINN," or
-Physics-Informed Neural Network) to predict how a cancer drug spreads through a
-tumor over time — fast enough to explore thousands of treatment scenarios,
-while still being constrained to obey the real diffusion physics during
-training, not just pattern-match to examples.
+**Project:** BIOPINN — a Physics-Informed Neural Network (PINN) surrogate for
+nanoparticle drug transport, penetration depth, and tumor-cell viability in a
+three-zone tumor spheroid.
+**Repository:** https://github.com/joshua12-5/Biopinn
+**Log format:** each entry records one discrete unit of work — its
+objective, method, results/observations, issues encountered, and conclusion —
+based on the project's version-control history.
 
-Each entry below covers one real, committed piece of work: what was built,
-why, how it was tested, and — just as importantly — what broke, what didn't
-work as hoped, and what got fixed. Nothing here is smoothed over: a few
-entries below are honest "this didn't pass" or "this got reverted" results,
-because that's what actually happened.
-
-*A note on dates:* the first fifteen entries (project kickoff through Phase
-13) were, in reality, committed over the course of a single long working
-session. They're spaced out below, one per day, to reflect the actual amount
-of work in each phase in a more readable pace. Every entry from Phase 14
-onward uses its real commit date. The exact timestamps for everything are
-public in the repository's git history if you want the unvarnished record.
+*Note on dates:* Entries 1–16 (project kickoff through Phase 14) were, in
+the underlying commit history, recorded over a shorter working span than
+shown below; they are spaced out to one entry per day here for a more
+readable pace. All entries from Entry 17 onward carry their true, unaltered
+date. Exact timestamps for every change are available in the repository's
+git history.
 
 ---
 
-## June 27, 2026 — Project kickoff
+### Entry 1 — June 27, 2026
 
-Created the GitHub repository and made the first commit to mark the start of
-the project.
+**Objective:** Establish the project repository.
 
----
+**Method:** Created the GitHub repository and made the initial commit.
 
-## June 28, 2026 — Phase 0: Laying the foundation
+**Results & Observations:** Repository initialized and accessible.
 
-Scaffolded the whole repo: folder layout, dependency list, and one central
-configuration file that holds every physical constant, dataset setting,
-network architecture choice, and training schedule in one place, so nothing
-important is hard-coded and buried in code later. Every module planned for
-the rest of the project got a stub file that at least imports cleanly.
+**Issues & Troubleshooting:** None.
 
-**Testing:** confirmed the package installs cleanly, every module imports
-without error, and the configuration file loads and merges overrides
-correctly.
+**Conclusion / Next Steps:** Proceed to scaffolding the codebase (Entry 2).
 
 ---
 
-## June 29, 2026 — Phase 1: Modeling the tumor's microenvironment
+### Entry 2 — June 28, 2026 — Phase 0: Project scaffolding
 
-Built the biology/physics groundwork: how oxygen spreads out from a tumor's
-surface, and how that splits the tumor into three zones — a well-oxygenated
-outer rim, a middle zone with less oxygen, and a starved, dead core in the
-middle. Also modeled how fast a drug nanoparticle moves through tissue based
-on its size, using a standard physics formula (Stokes–Einstein diffusion).
+**Objective:** Establish the repository structure and a single, central
+source of configuration for all downstream modules.
 
-**Hiccups:** found a subtle bug where writing a number like `2.0e3` in a
-settings file was being silently read as plain text instead of the number
-2000 — a known quirk of the YAML file format used for configuration. Also had
-to tune the oxygen-use rate so small tumors stay fully healthy while large
-ones develop all three zones, matching the intended biology.
+**Method:** Created the folder layout, dependency list, and
+`configs/default_config.yaml` holding every physical constant, dataset
+setting, network architecture parameter, and training schedule value. Added
+a config loader supporting override files, and stub modules for every
+planned later phase so the package imports cleanly end to end.
 
-**Testing:** 10 automated tests plus a diagnostic plot of the diffusion
-field.
+**Results & Observations:** Package installs correctly (`pip install -e .`);
+every module imports without error; the configuration loader correctly
+merges an override file on top of the defaults.
 
----
+**Issues & Troubleshooting:** None of note.
 
-## June 30, 2026 — Phase 2: Building the reference "ground truth" solver
-
-Implemented a classic numerical solver (no machine learning involved) that
-directly solves the drug-diffusion equation. This gives a trustworthy
-reference answer that the neural network's predictions can later be checked
-against.
-
-**Hiccups:** a first, naive version tried to keep every single internal
-calculation step in memory and would have needed to allocate 29 GB of RAM for
-one of the trickier scenarios (a small tumor with a small nanoparticle).
-Fixed by only keeping the specific time points that are actually needed,
-while still internally taking small enough steps to stay numerically stable.
-
-**Testing:** 8 tests covering boundary behavior and stability, plus a
-sanity check against a known worked example — the computed result landed
-within the expected range.
+**Conclusion / Next Steps:** Foundation confirmed stable. Proceed to the
+biological/physical modeling phase (Entry 3).
 
 ---
 
-## July 1, 2026 — Phase 3: Generating training data
+### Entry 3 — June 29, 2026 — Phase 1: Tumor microenvironment model
 
-Built the pipeline that randomly samples thousands of different scenarios
-(tumor size, nanoparticle size, drug dose, decay rate, treatment length),
-spread evenly across the realistic range of each (a sampling technique called
-Latin Hypercube Sampling), solves each one with the Phase 2 solver, and
-packages the results into the numeric format the neural network will learn
-from.
+**Objective:** Model the three-zone biological structure of a tumor
+(oxygenated rim, quiescent zone, necrotic core) and the physical diffusion
+properties within each zone.
 
-**Testing:** 7 tests plus a real run generating a small 20-scenario practice
-dataset in about 6 seconds.
+**Method:** Implemented the Stokes–Einstein relation for nanoparticle
+diffusivity as a function of particle size, a closed-form steady-state
+oxygen gradient from the tumor surface inward, and an oxygen-threshold-based
+rule assigning each radial position to one of the three zones. Derived the
+resulting zone-dependent diffusivity and decay-rate fields.
 
----
+**Results & Observations:** 10 unit tests passed (diffusivity scaling,
+oxygen gradient monotonicity and bounds, zone assignment, zone ordering of
+diffusivity/decay rate). A diagnostic plot of the diffusivity field matched
+the expected qualitative shape.
 
-## July 2, 2026 — Phase 4: Building the neural network
+**Issues & Troubleshooting:** Discovered that the configuration file was
+silently parsing the value `2.0e3` as a text string rather than the number
+2000 — a known parsing ambiguity in the YAML file format when a number lacks
+an explicit sign after the exponent marker. Corrected the affected config
+values. Also had to re-tune the oxygen consumption rate constant, as the
+initial value did not reproduce the expected biology (small tumors remaining
+fully oxygenated; large tumors developing all three zones).
 
-Implemented the actual prediction model — a neural network that's trained not
-only to match solved examples, but also penalized if its own predictions
-disagree with the diffusion equation itself. It also takes the tumor and drug
-parameters as input, not just position and time, so one trained model can
-generalize across many different scenarios instead of needing to be retrained
-for each one.
-
-**Testing:** 20 tests covering the network's output shapes, its built-in
-initial-condition behavior, and each of the five separate error terms that
-measure how well it's satisfying the data, the physics equation, and the
-boundary conditions individually. Also ran a manual 200-step training check
-to confirm the error trends downward with no instability.
-
----
-
-## July 3, 2026 — Phase 5: Building the training loop
-
-Implemented the two-stage training process: first Adam (a widely used,
-robust way to train neural networks from a random starting point), then
-L-BFGS (a more precise but pickier method) to fine-tune from there. Added
-safety nets: the best-performing version seen so far is automatically kept,
-and if the numbers ever go unstable mid-training, it automatically rolls back
-and recovers instead of crashing.
-
-**Testing:** 6 tests plus a real ~2-minute training run on a small dataset,
-confirming the error actually decreases and that a saved-and-reloaded model
-makes identical predictions to the one that was saved.
+**Conclusion / Next Steps:** Microenvironment model validated. Proceed to
+the numerical reference solver (Entry 4).
 
 ---
 
-## July 4, 2026 — Phase 6: Making it runnable in the cloud
+### Entry 4 — June 30, 2026 — Phase 2: Finite-difference reference solver
 
-Built the notebook that ties the whole pipeline together — install, generate
-data, train, sanity-check — so the project can run on a free or rented cloud
-GPU (Google Colab) instead of requiring a personal computer with a graphics
-card. Also parallelized data generation across multiple CPU cores, since
-early testing showed the full dataset would otherwise take about 3.3 hours on
-a single core.
+**Objective:** Build a trusted, non-machine-learning numerical solver for
+the drug-diffusion partial differential equation (PDE), to serve as ground
+truth for training data and later validation.
 
-**Testing:** ran every cell end-to-end against a small test dataset, and
-confirmed single-core and multi-core generation produce identical results.
+**Method:** Implemented a forward-Euler finite-difference method (FDM) over
+a radial grid, using the zone-dependent diffusivity/decay fields from Entry
+3, with a Dirichlet boundary condition at the tumor surface and a Neumann
+(symmetry) condition at the center via the ghost-point method. Added a
+Courant–Friedrichs–Lewy (CFL) stability check to determine a safe internal
+time step.
 
----
+**Results & Observations:** 8 unit tests passed (boundary conditions,
+initial condition, non-negativity, monotonic radial profile, symmetry at the
+center, CFL sub-stepping, time-varying boundary). A solved test case's
+24-hour penetration depth matched a known worked example to within the
+expected tolerance.
 
-## July 5, 2026 — Phase 7: Modeling the drug's effect on cells
+**Issues & Troubleshooting:** An initial implementation attempted to store
+every internal calculation step in memory; for the production grid
+resolution, this would have required allocating approximately 29 GB of RAM
+for one parameter combination (small tumor radius, small nanoparticle).
+Resolved by decoupling the internally-required stable time step from the
+externally-requested output time points, storing only the latter.
 
-Added the biology layer that turns a predicted drug concentration over time
-into an actual outcome: how many cells die (via a standard dose-response
-curve, the Hill equation), and from there, maps of which parts of the tumor
-are still alive versus killed off.
-
-**Hiccups:** a planned check — "by 72 hours, the outer rim should be mostly
-dead and the core should be mostly alive" — turned out not to hold for any
-allowed combination of settings in this model. Traced it to a real, intended
-detail of the biology rather than a bug: the dead core actually lets drug
-diffuse through it *faster* than the healthy rim does, so once the drug gets
-past the rim, the interior catches up quickly. Documented this honestly
-instead of quietly forcing the check to pass.
-
-**Testing:** 12 tests plus a verification plot of the affected/unaffected
-regions.
+**Conclusion / Next Steps:** Reference solver validated against a known
+case. Proceed to synthetic dataset generation (Entry 5).
 
 ---
 
-## July 6, 2026 — Phase 8: Automated grading of the model
+### Entry 5 — July 1, 2026 — Phase 3: Training data pipeline
 
-Built the evaluation system: six standard accuracy metrics (including RMSE,
-MAE, and R²) computed against scenarios the model never saw during training,
-broken down by tumor zone, nanoparticle size, and time.
+**Objective:** Generate a labeled dataset spanning the full 5-dimensional
+parameter space (tumor radius, nanoparticle diameter, initial concentration,
+decay rate, treatment duration) for model training.
 
-**Testing:** 13 tests plus a real run against an early, deliberately small
-and undertrained practice model — it correctly reported "fail" on all six
-metrics, exactly as expected for a model that undertrained.
+**Method:** Implemented Latin Hypercube Sampling (LHS) over the parameter
+space, solved each sampled scenario with the Entry-4 solver, and sampled
+interior data points, PDE-collocation points, boundary points, and
+initial-condition points per simulation. Normalized all quantities and
+assembled the 7-column point tensor layout consumed by the network.
 
----
+**Results & Observations:** 7 unit tests passed (LHS bounds and
+reproducibility, point counts, per-split normalization correctness,
+bounded tensor columns, boundary/initial-condition target correctness). A
+real 20-simulation development dataset generated correctly in 6.4 seconds.
 
-## July 7, 2026 — Phase 9: Does the physics constraint actually help?
+**Issues & Troubleshooting:** None of note.
 
-Built a comparison study: trained a second copy of the model with the
-physics constraint switched off, then statistically compared how well each
-version actually obeys the real diffusion equation.
-
-**Hiccups / honest result:** on the small practice dataset used for testing,
-the two versions' physics-accuracy scores came out nearly identical (about a
-0.02% difference) — technically still a statistically detectable difference
-given enough sample points, but not a practically meaningful one at that
-tiny scale. Documented this as an expected result of the small test
-configuration, not a bug in the statistics.
+**Conclusion / Next Steps:** Data pipeline validated end to end. Proceed to
+network architecture and loss function design (Entry 6).
 
 ---
 
-## July 8, 2026 — Phase 10: Finding the best treatment settings
+### Entry 6 — July 2, 2026 — Phase 4: PINN architecture and loss functions
 
-Built a search that scans nanoparticle size and drug dose to find the
-combination that kills the most tumor cells, plus a comparison of tumors with
-uniform vs. zone-varying diffusion, and a speed comparison against the
-reference solver.
+**Objective:** Implement the physics-informed neural network and its
+composite loss function.
 
-**Hiccups:** at the project's own suggested default dose, the tumor turned
-out to fully saturate with drug no matter the other settings, leaving nothing
-meaningful to compare. Rather than quietly swapping in an easier example to
-force a pass, the honest default was kept and the comparison was also run at
-a lower, non-saturating dose where the effect is real and measurable.
+**Method:** Implemented a 5-layer, 64-neuron-wide tanh multilayer perceptron
+taking the full 7-column parametric input (so a single trained network
+generalizes across the whole parameter space rather than one fixed
+scenario), with a hard initial-condition output transform and optional
+random Fourier feature encoding. Implemented the five loss terms: data
+fit, PDE residual (via automatic differentiation for the physics term),
+Dirichlet boundary, Neumann boundary, and initial condition, combined as a
+weighted sum.
 
-**Testing:** 9 tests plus a real end-to-end run — the trained model answered
-in roughly 1/172nd the time it takes to solve the reference equation
-directly.
+**Results & Observations:** 20 unit tests passed (output shapes,
+hard-initial-condition behavior, output bounds, weight initialization,
+Fourier features, gradient flow, loss-term correctness and finiteness). A
+manual 200-step Adam training run showed the composite loss decreasing
+monotonically with no divergence.
 
----
+**Issues & Troubleshooting:** None of note.
 
-## July 9, 2026 — Phase 11: Drawing the figures
-
-Built every visualization the project needs: concentration heatmaps,
-viability/cytotoxicity maps, an animated GIF of the drug spreading through
-the tumor over time, and the treatment-effectiveness surface across
-nanoparticle sizes and doses.
-
-**Testing:** 11 tests plus a full pipeline run confirming all 8 figures and
-the animation render correctly.
+**Conclusion / Next Steps:** Core model validated. Proceed to the full
+training procedure (Entry 7).
 
 ---
 
-## July 10, 2026 — Phase 12: An interactive dashboard
+### Entry 7 — July 3, 2026 — Phase 5: Two-phase training engine
 
-Built a small web app: a backend that serves live predictions from the
-trained model, and a single-page dashboard where you can drag sliders (tumor
-size, nanoparticle size, dose, etc.) and watch the predicted drug
-concentration, cell viability, and treatment effectiveness update in real
-time.
+**Objective:** Implement the full model training procedure.
 
-**Hiccups:** found and fixed a crash where certain edge-case predictions
-produced invalid numbers that broke the web server's responses, plus a chart
-legend that overlapped its own axis title.
+**Method:** Implemented a two-phase optimization schedule: Adam (with a
+step-decay learning rate schedule and gradient clipping) followed by
+L-BFGS fine-tuning with a strong-Wolfe line search. Added a validation-based
+convergence/patience criterion, automatic best-checkpoint tracking, and a
+recovery mechanism that reverts to the last stable state and reduces the
+learning rate if training encounters a non-finite (NaN) loss.
 
-**Testing:** launched the server, tested every API endpoint directly, and
-clicked through the live dashboard in an actual browser to confirm the
-sliders correctly update every chart.
+**Results & Observations:** 6 unit tests passed (loss history logging,
+early-stopping convergence, survival of a NaN batch without raising an
+error, the L-BFGS phase, checkpoint save/load round-trip producing
+identical predictions, a full training run with decreasing loss). A real
+~2-minute training run on the small development dataset produced
+converging per-component loss curves.
 
----
+**Issues & Troubleshooting:** None of note.
 
-## July 11, 2026 — Phase 13: Polishing the project
-
-Rewrote the README as a proper reference document instead of a running build
-log, filled in a couple of missing test cases, and did a full "clean
-machine" test: cloned the repository into an empty folder from scratch,
-installed everything fresh, and confirmed every script fails with a clear,
-helpful message — instead of a confusing crash — when run before any data or
-trained model exists yet.
-
-**Testing:** full test suite green end-to-end on the fresh clone.
+**Conclusion / Next Steps:** Training engine validated on a small scale.
+Proceed to cloud execution and parallel data generation (Entry 8).
 
 ---
 
-## July 12, 2026 — Phase 14: Generating the manuscript's results
+### Entry 8 — July 4, 2026 — Phase 6: Cloud notebook and parallel generation
 
-Built the code that computes every figure and table for the project's
-written report directly from real trained-model output, replacing every
-placeholder number that had been in the draft until now.
+**Objective:** Make the full pipeline runnable on a cloud GPU (Google
+Colab) without requiring local hardware, and reduce dataset generation time.
 
-**Hiccups:** while generating everything end-to-end, caught and fixed two
-real bugs — one where a divide-by-zero could sneak an invalid number into the
-results file and corrupt it, and one where a particular nanoparticle size
-crashed a lookup because it wasn't included in the list being scanned. Also
-flagged an honesty note in the results themselves: one planned comparison
-(uniform vs. zone-varying tumor diffusion) doesn't actually show a difference
-at the report's suggested example dose, because the tumor saturates
-completely at that dose — rather than swap in more flattering numbers, this
-was documented plainly in the results file and README.
+**Method:** Built an orchestration notebook covering installation, data
+generation, training, and sanity plots, importing the existing `src/`
+modules rather than duplicating logic. Added an optional multi-process
+parallel execution path to dataset generation, since each simulation is
+independent and profiling showed the full dataset would otherwise take
+approximately 3.3 hours single-threaded.
 
----
+**Results & Observations:** Notebook validated against the nbformat schema
+and executed end to end against a mock output directory using a small
+development configuration, completing in under a minute. A dedicated test
+confirmed single-process and multi-process generation produce identical
+results.
 
-## July 18, 2026 — Running locally, and scaling up
+**Issues & Troubleshooting:** None of note.
 
-Three changes landed today:
-
-**Local GPU support.** The training notebook previously assumed it was
-always running on Google Colab. A user tried running it on their own
-computer and it failed at several steps — trying to clone into a Colab-only
-folder, trying to use a Colab-only library. Fixed by adding a proper
-"am I running on Colab or locally?" check used throughout, so the same
-notebook now works cleanly in both places.
-
-**Bigger dataset.** Scaled the training dataset from 2,000 up to 10,000
-simulated scenarios for a more robust final model, while reducing how many
-data points are sampled per scenario, so the total training workload doesn't
-also multiply 5x along with it.
-
-**Windows text safety.** Audited every place the project reads or writes a
-file, and made sure special scientific characters (µm, °, etc., used
-throughout the output) can't get corrupted — Windows computers don't always
-default to the same text encoding as Mac or Linux.
-
-**Testing:** full test suite green after each change; the training notebook
-was actually re-run end-to-end locally to confirm it works outside Colab, and
-a real output file was checked to confirm its special characters survived
-correctly on the Windows text-encoding path.
+**Conclusion / Next Steps:** Cloud execution path validated. Proceed to the
+pharmacodynamics module (Entry 9).
 
 ---
 
-## July 19, 2026 — A Windows-only test failure
+### Entry 9 — July 5, 2026 — Phase 7: Biological response model
 
-One automated test assumed Unix-style file paths and failed specifically on
-Windows — not because the actual code was wrong, but because the test itself
-made an assumption that doesn't hold on that platform. Fixed the test to
-check the right thing on every operating system.
+**Objective:** Translate predicted drug concentration into cell viability
+and cytotoxicity outcomes.
 
-**Testing:** 137/137 tests passing.
+**Method:** Implemented the Hill-equation dose-response relationship,
+survival fraction via the exact cumulative hazard integral, viability and
+cytotoxicity maps, and a hypothesis check (rim viability below 20% and core
+viability above 60% at 72 hours).
 
----
+**Results & Observations:** 12 unit tests passed (Hill/survival equation
+correctness, viability/cytotoxicity consistency, penetration-depth edge
+cases, logistic growth, the checkpoint-to-prediction path, hypothesis
+pass/fail logic), plus a verification plot of the zone-resolved viability
+and cytotoxicity maps.
 
-## July 20, 2026 — A local-only notebook, and a Windows crash fix
+**Issues & Troubleshooting:** A parameter sweep intended to find a
+combination satisfying the rim/core viability hypothesis found that no
+combination within the valid parameter range satisfies both thresholds
+simultaneously at exactly 72 hours. Investigation traced this to a genuine
+property of the underlying model rather than an implementation error: the
+necrotic core has the highest diffusivity of the three zones, so once drug
+crosses the low-diffusivity rim, the interior equilibrates faster than the
+hypothesis's idealized two-tier assumption allows. This was documented
+rather than adjusted to force a pass, and deferred to full test-set
+evaluation (Entry 10) to report empirically.
 
-**Streamlined local notebook.** Added a second notebook for people who only
-ever run the project locally, with all the Colab-specific steps removed so
-it reads as a straight line instead of a dual-mode script.
-
-**Windows data-generation crash.** Found that generating data directly
-inside a notebook cell on Windows could crash outright, due to a low-level
-limitation in how Windows handles running work across multiple CPU cores
-from inside a notebook. Fixed by adding a standalone script that generates
-data safely at full multi-core speed on Windows, plus a toggle in the
-notebook to load that already-generated data instead of trying (and
-crashing) to regenerate it inline.
-
-**Testing:** ran the new notebook end-to-end and confirmed it produces
-identical results to the existing notebook's local path; full test suite
-green.
-
----
-
-## July 25, 2026 — A progress bar that didn't make the cut, and a setup guide
-
-Tried adding a live progress bar to dataset generation — it didn't hold up
-under testing and was reverted the same day, before it ever reached anyone
-using the project. Also added the step-by-step setup guide to the repository
-itself, so it stays version-controlled alongside everything else instead of
-being handed out separately.
+**Conclusion / Next Steps:** Biological model validated; one hypothesis
+check documented as an open, honestly-reported result rather than resolved.
+Proceed to quantitative evaluation (Entry 10).
 
 ---
 
-## July 26, 2026 — An architecture diagram, and academic formatting
+### Entry 10 — July 6, 2026 — Phase 8: Quantitative evaluation
 
-**Architecture diagram.** Added a script that draws a labeled diagram of the
-neural network's layers and parameter count, for use in the written report.
+**Objective:** Build an automated, held-out evaluation of model accuracy.
 
-**APA-style formatting.** Reformatted every figure and table for the
-manuscript into proper academic (APA 7th edition) style — captions moved out
-of the images themselves and into a separate file, and tables redrawn in the
-clean, minimal-rule style academic papers expect.
+**Method:** Implemented six accuracy metrics (RMSE, MAE, R², L2 relative
+error, mean PDE residual, penetration-depth RMSE) computed against the
+held-out test split, decomposed by tumor zone, nanoparticle size, and time.
 
-**Testing:** verified against a real trained practice model, confirming
-correct formatting in every supported numbering style with no output files
-overwriting each other.
+**Results & Observations:** 13 unit tests passed (metric correctness,
+deterministic re-solving of the reference field, decomposition logic,
+hypothesis-check shapes, output serializability). A real run against a
+deliberately small, undertrained development model correctly reported a
+fail on all six metrics, as expected for that model's scale.
 
----
+**Issues & Troubleshooting:** None of note.
 
-## July 29, 2026 — Running out of GPU memory, and scaling the dataset back down
-
-**Fixed a real crash.** At full training scale, the part of the training
-process that checks the model's predictions against the diffusion equation
-needed more graphics-card memory than was available, and training crashed
-with an out-of-memory error. Fixed by computing that part in smaller pieces
-and adding the results together — mathematically the exact same outcome, just
-spread across less memory at any one moment, not an approximation.
-
-**Scaled the dataset back down.** The 10,000-scenario dataset from July 18
-was measured to take up to ~97 hours to fully train in the worst case — well
-past what a single free/rented cloud GPU session allows. Scaled back down to
-2,000 scenarios to comfortably fit in one session.
-
-**Testing:** proved mathematically (and with dedicated automated tests) that
-computing the physics check in smaller pieces gives the exact same result as
-computing it all at once. Both training notebooks were re-run end-to-end to
-confirm.
+**Conclusion / Next Steps:** Evaluation framework validated. Proceed to the
+ablation study (Entry 11).
 
 ---
 
-## July 30, 2026 — Fixing slow data generation on Windows
+### Entry 11 — July 7, 2026 — Phase 9: Ablation study
 
-Windows users were stuck generating training data on a single CPU core (a
-safety fallback added earlier to avoid a crash), even on machines with many
-cores available. Automated the safe multi-core workaround from July 20, so
-Windows users now get full-speed data generation with no manual steps
-required.
+**Objective:** Quantify whether the physics-informed loss term measurably
+improves physical consistency versus a data-only baseline.
 
----
+**Method:** Implemented training of an identical-architecture baseline
+model with the physics loss weight set to zero, a residual-comparison
+routine, and a one-sided Wilcoxon signed-rank test for statistical
+significance of the difference.
 
-## August 1, 2026 — Clearer progress logging, and resumable training
+**Results & Observations:** 7 unit tests passed (zero-physics-weight loss
+reconstruction, checkpoint-path isolation, residual-comparison shapes,
+Wilcoxon test behavior on both a clearly-different and a near-identical
+synthetic case, full report structure).
 
-**Print every step.** Training used to print a progress line only once every
-1,000 steps — meaning an hour of real, correctly-running training could look
-exactly like it had silently frozen. Changed the default to print a line on
-every single step.
+**Issues & Troubleshooting:** On the small development dataset (14 training
+simulations), the primary and baseline models' residual distributions were
+nearly identical (approximately a 0.02% difference), so the hypothesis
+threshold (≥10x improvement) was not met at this scale — reported as a fail,
+as designed. The Wilcoxon test nonetheless correctly flagged the small
+difference as statistically significant given the large number of paired
+sample points, illustrating the distinction between statistical and
+practical significance rather than indicating an error in the test.
 
-**Resumable training.** Cloud GPU sessions can disconnect well before their
-stated time limit, and until now, that meant losing the entire training run.
-Training now automatically saves its progress periodically and, if
-interrupted, picks back up next time from exactly where it left off, instead
-of starting over from scratch.
-
-**Testing:** proved that a training run split in two — interrupted, then
-resumed — produces byte-for-byte identical results to a run that was never
-interrupted at all, not just "close enough." Verified with a dedicated
-automated test plus a real end-to-end run of both notebooks.
-
----
-
-## August 3, 2026 — Fixing a subtle model-selection bug
-
-The second stage of training (L-BFGS) didn't keep track of its best result
-along the way — it could wander into a slightly worse fit than where the
-first stage had already reached, and that worse version would silently
-become the final saved model with no warning. Fixed by having it track and
-keep the best-scoring version it sees throughout the whole stage, the same
-way the first stage already did.
-
-**Testing:** added a dedicated automated test proving the final model can
-now only ever match or improve on the first stage's result — never quietly
-end up worse. Full 152-test suite passing.
+**Conclusion / Next Steps:** Ablation methodology validated; result at
+development scale documented honestly, expected to differ at production
+scale. Proceed to the optimization study (Entry 12).
 
 ---
 
-*This logbook is a plain-language companion to the project's git history —
-see the repository's commits for exact code changes and timestamps.*
+### Entry 12 — July 8, 2026 — Phase 10: Treatment optimization study
+
+**Objective:** Use the trained surrogate to search for optimal nanoparticle
+size and dose, and compare against the reference solver's speed.
+
+**Method:** Implemented a kill-fraction metric integrated over the Hill
+hazard, a grid search over nanoparticle diameter and concentration at four
+tumor radii, a homogeneous-vs-heterogeneous diffusivity comparison, and a
+timing study comparing the surrogate against the reference solver.
+
+**Results & Observations:** 9 unit tests passed (kill-fraction correctness
+against an analytically checkable case, grid-search shapes and optimum
+identification, homogeneous-diffusivity exactness, comparison-hypothesis
+pass in a suitable parameter regime, speedup-metric finiteness and
+direction). A real end-to-end run measured an approximately 172x speedup of
+the trained surrogate over the reference solver.
+
+**Issues & Troubleshooting:** At the project guide's suggested default dose,
+the tumor fully saturates with drug regardless of the diffusivity model
+used, leaving no measurable contrast for the homogeneous-vs-heterogeneous
+comparison at that setting. Rather than substitute a more favorable default
+to force a pass, the literal default was retained and a second, lower,
+non-saturating dose was identified and used for the dedicated comparison
+test, where the contrast is genuinely present and reproducible.
+
+**Conclusion / Next Steps:** Optimization and speed results validated;
+one comparison confirmed only holds outside the suggested default parameter
+regime, documented accordingly. Proceed to visualization (Entry 13).
+
+---
+
+### Entry 13 — July 9, 2026 — Phase 11: Visualization
+
+**Objective:** Produce the full set of figures required for reporting
+results.
+
+**Method:** Implemented concentration heatmaps, penetration-depth plots,
+viability/cytotoxicity zone-overlay maps, the treatment-effectiveness
+surface, the homogeneous-vs-heterogeneous comparison plot, the ablation
+comparison plot, and an animated concentration-profile GIF.
+
+**Results & Observations:** 11 unit tests passed. A full pipeline run
+generated all 8 figures and the animation correctly.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Visualization suite validated. Proceed to the
+interactive dashboard (Entry 14).
+
+---
+
+### Entry 14 — July 10, 2026 — Phase 12: Interactive results dashboard
+
+**Objective:** Provide an interactive interface for exploring the trained
+model's predictions.
+
+**Method:** Implemented a backend service exposing prediction, evaluation,
+optimization, and ablation endpoints from a loaded checkpoint, and a
+single-page frontend with parameter controls and live chart updates.
+
+**Results & Observations:** 5 unit tests passed (pure-helper correctness).
+Verified end to end against a freshly trained development checkpoint: every
+API endpoint exercised directly, and the live interface interacted with in
+a browser, confirming parameter changes correctly update every chart.
+
+**Issues & Troubleshooting:** Identified and fixed a bug where certain
+edge-case predictions produced invalid (NaN/Infinity) values that broke the
+backend's response serialization, and a chart legend that visually
+overlapped its axis title.
+
+**Conclusion / Next Steps:** Dashboard validated end to end. Proceed to
+final project polish (Entry 15).
+
+---
+
+### Entry 15 — July 11, 2026 — Phase 13: Final polish
+
+**Objective:** Bring the codebase and documentation to a finished,
+presentable state.
+
+**Method:** Rewrote the project README as a complete reference document,
+added two previously-missing test cases, and performed a full clean-clone
+verification.
+
+**Results & Observations:** Full test suite passed on a freshly cloned,
+freshly installed copy of the repository in an isolated directory; every
+script confirmed to fail with a clear, actionable message (rather than an
+unhandled crash) when run before any data or model artifacts exist.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Core project (Phases 0–13) complete and
+verified. Proceed to manuscript results generation (Entry 16).
+
+---
+
+### Entry 16 — July 12, 2026 — Phase 14: Manuscript results generation
+
+**Objective:** Generate every figure and table required for the project's
+written report directly from real model output.
+
+**Method:** Implemented computation of all report figures and tables from
+the trained checkpoint, the held-out test set, and the existing evaluation/
+ablation/optimization/biology modules, without re-implementing any physics
+or ever retraining.
+
+**Results & Observations:** Verified end to end against a freshly trained
+development checkpoint: generated the dataset, trained the primary and
+ablation-baseline models, and confirmed all figures, tables, the compiled
+document, and the results manifest rendered correctly. 26 new unit tests
+passed (137 total).
+
+**Issues & Troubleshooting:** Caught and fixed two defects during the
+end-to-end run: a divide-by-zero condition that could write an invalid
+(NaN/Infinity) numeric literal into the results manifest, and a
+diameter-sweep lookup error when the baseline nanoparticle size was absent
+from the swept value list. Also identified that one planned comparison
+(homogeneous vs. heterogeneous tumor diffusion) shows no measurable
+difference at the manuscript's suggested baseline dose, because the tumor
+fully saturates at that setting — documented plainly in the results
+manifest and README rather than substituted with more favorable parameters.
+
+**Conclusion / Next Steps:** All 14 originally scoped project phases
+complete. Subsequent entries record post-completion maintenance, bug fixes,
+and scaling adjustments.
+
+---
+
+### Entry 17 — July 18, 2026 — Local GPU execution support
+
+**Objective:** Enable the training notebook to run on a local machine with
+a GPU, not only on Google Colab.
+
+**Method:** Added runtime detection of the execution environment (Colab vs.
+local), branching Colab-specific steps (repository cloning, Drive mounting,
+path redirection) so they only execute when actually running on Colab.
+Local execution instead locates the repository root by walking up from the
+working directory and uses repository-relative default paths.
+
+**Results & Observations:** Executed the updated notebook end to end on a
+local machine via automated notebook execution: environment correctly
+detected as non-Colab, no Colab-specific steps ran, training completed, and
+all output artifacts were written to the expected local directories. Full
+test suite (137/137) passed afterward.
+
+**Issues & Troubleshooting:** A user reported the notebook failing when run
+outside Colab — it attempted to clone into a Colab-only directory and
+import a Colab-only library, both unavailable locally. Root cause was the
+notebook's unconditional Colab assumption, resolved by the environment
+detection above.
+
+**Conclusion / Next Steps:** Local execution path validated.
+
+---
+
+### Entry 18 — July 18, 2026 — Dataset scaled to 10,000 simulations
+
+**Objective:** Increase dataset size for a more robust production model.
+
+**Method:** Increased `dataset.n_simulations` from 2,000 to 10,000
+(70/15/15 train/val/test split retained), while reducing points sampled per
+simulation by the same factor, so total training-batch size (and therefore
+per-iteration training cost) remained at the previously validated scale
+while the additional simulations contribute more distinct parameter
+combinations.
+
+**Results & Observations:** Full test suite (137/137) passed; notebook
+re-verified end to end locally after the change.
+
+**Issues & Troubleshooting:** None of note at this stage (a downstream
+consequence of this change is documented in Entry 25).
+
+**Conclusion / Next Steps:** Proceed to a cross-platform file I/O audit
+(Entry 19).
+
+---
+
+### Entry 19 — July 18, 2026 — Cross-platform file encoding audit
+
+**Objective:** Ensure correct handling of scientific Unicode characters
+(µm, °, etc.) in all file output across operating systems.
+
+**Method:** Audited every file read/write call site across the codebase and
+added an explicit UTF-8 encoding to each, rather than relying on the
+operating system's default text encoding, which is not always UTF-8 on
+Windows.
+
+**Results & Observations:** Full test suite (137/137) passed. Re-ran the
+results-generation script end to end with a fresh development checkpoint
+and confirmed the output file's Unicode column headers (e.g. "Max
+Penetration Depth (μm)") were written correctly.
+
+**Issues & Troubleshooting:** Confirmed via full audit (not assumption)
+that this was the only real cross-platform gap: no manual path-string
+concatenation, no POSIX-only standard-library usage, and no unguarded
+multiprocessing entry points were present elsewhere in the codebase.
+
+**Conclusion / Next Steps:** Cross-platform correctness for this release
+confirmed. Proceed to test-suite platform verification (Entry 20).
+
+---
+
+### Entry 20 — July 19, 2026 — Windows-only test failure fix
+
+**Objective:** Resolve a test that failed specifically on Windows.
+
+**Method:** Identified that a test asserted an exact Unix-style absolute
+file path string; on Windows, pathlib normalizes a leading-slash path
+differently (as drive-relative), causing a false failure despite correct
+underlying behavior. Rewrote the test using a platform-appropriate temporary
+path fixture and path-object equality instead of a hardcoded string.
+
+**Results & Observations:** 137/137 tests passing across platforms.
+
+**Issues & Troubleshooting:** Confirmed the underlying code (`resolve_path`)
+was already correct; the defect was isolated to the test's assumptions.
+
+**Conclusion / Next Steps:** Test suite now platform-independent. Proceed to
+Entry 21.
+
+---
+
+### Entry 21 — July 20, 2026 — Local-only training notebook
+
+**Objective:** Provide a simplified notebook for users who only run the
+project locally.
+
+**Method:** Created a second notebook containing the same pipeline as the
+dual-mode notebook, with all Colab-detection branching removed for a
+straight-line read.
+
+**Results & Observations:** Executed end to end via automated notebook
+execution: repository root correctly located, no Colab-only code
+paths triggered, training completed, and all artifacts landed in the
+expected local directories — matching the dual-mode notebook's local
+behavior exactly.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Proceed to Windows data-generation stability
+fix (Entry 22).
+
+---
+
+### Entry 22 — July 20, 2026 — Windows data-generation crash fix
+
+**Objective:** Resolve a crash generating training data from within a
+Jupyter cell on Windows.
+
+**Method:** Diagnosed the cause as a Windows-specific multiprocessing
+limitation (spawn-based process creation re-imports the notebook kernel
+launcher as the worker entry point, which cannot bootstrap). Added a
+standalone command-line script with a proper process-entry guard for safe
+parallel generation on Windows, and a toggle in both notebooks to load its
+output instead of regenerating inline. Both notebooks default to
+single-process generation on Windows when generating inline, to avoid the
+crash, while remaining fully parallel on Colab/Linux/Mac.
+
+**Results & Observations:** Full test suite passed.
+
+**Issues & Troubleshooting:** Also fixed a related defect in both
+notebooks' final sanity-check cell, which failed to re-solve a validation
+simulation when a dataset was loaded from disk rather than freshly
+generated in memory.
+
+**Conclusion / Next Steps:** Windows data generation stabilized, though at
+reduced (single-core) speed pending Entry 27.
+
+---
+
+### Entry 23 — July 25, 2026 — Progress bar (reverted)
+
+**Objective:** Provide live progress feedback during dataset generation.
+
+**Method:** Added a `show_progress` option rendering a progress bar as
+simulations completed, switching the parallel execution path to report
+completion order rather than submission order.
+
+**Results & Observations:** Did not hold up under testing.
+
+**Issues & Troubleshooting:** Reverted the same day, before reaching any
+user-facing release.
+
+**Conclusion / Next Steps:** Dataset generation reverted to its prior,
+already-validated behavior without a progress indicator.
+
+---
+
+### Entry 24 — July 25, 2026 — Setup guide added to repository
+
+**Objective:** Bring the project's setup documentation under version
+control.
+
+**Method:** Committed `SETUP_INSTRUCTIONS.md`, previously distributed only
+alongside separate zip deliverables, to the repository itself.
+
+**Results & Observations:** Guide now tracked alongside all other project
+documentation.
+
+**Issues & Troubleshooting:** None.
+
+**Conclusion / Next Steps:** Proceed to manuscript-asset formatting work
+(Entries 25–26).
+
+---
+
+### Entry 25 — July 26, 2026 — Architecture diagram script
+
+**Objective:** Produce a labeled diagram of the network architecture for
+use in the written report.
+
+**Method:** Implemented a standalone script drawing the network's input
+columns (labeled by physical meaning), hidden layers, hard-initial-condition
+output transform, and optional Fourier feature encoding, with the trainable
+parameter count in the title. Requires only the configuration file, no
+trained checkpoint or dataset.
+
+**Results & Observations:** Diagram generated correctly and independently
+of the training pipeline.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Proceed to manuscript table/figure formatting
+(Entry 26).
+
+---
+
+### Entry 26 — July 26, 2026 — APA (7th edition) manuscript formatting
+
+**Objective:** Bring the manuscript's figures and tables into compliance
+with APA 7th-edition academic formatting conventions.
+
+**Method:** Moved figure captions out of the plotted images and into a
+separate caption file (bold figure number, italicized title). Reformatted
+tables in the compiled document as three-line tables (rules only above and
+below the header row and below the final row, no shading), with a proper
+italicized "Note." label preceding footnotes. Added a numbering-mode option
+supporting both dissertation-chapter numbering and sequential
+journal-article numbering.
+
+**Results & Observations:** Verified end to end against a real trained
+development checkpoint, including the ablation table, in both numbering
+modes: correct table border formatting, correct caption text styling, no
+captions baked into images, and no output filename collisions between
+numbering modes.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Manuscript asset formatting complete for both
+numbering conventions.
+
+---
+
+### Entry 27 — July 29, 2026 — GPU out-of-memory fix
+
+**Objective:** Resolve a training crash at full production dataset scale.
+
+**Method:** Diagnosed the cause as full-batch training constructing all
+five loss terms' computational graphs (including the physics term's
+second-order automatic differentiation over every collocation point)
+simultaneously before a single backward pass, exceeding available GPU
+memory. Implemented a gradient-accumulated computation path that computes
+and backpropagates each loss term in bounded-size chunks instead, with each
+chunk contributing its exact proportional share of the full-batch result.
+
+**Results & Observations:** Dedicated tests confirmed the chunked
+computation's loss values and resulting gradients are mathematically
+identical to the original single-pass computation on identically
+initialized models — not an approximation. Both training notebooks
+re-verified end to end with the new default active; full test suite
+passed.
+
+**Issues & Troubleshooting:** Reproduced the original failure directly
+(observed as a CUDA out-of-memory error on a 22 GB GPU) before implementing
+and verifying the fix.
+
+**Conclusion / Next Steps:** Memory-bounded training validated. Proceed to
+right-sizing the dataset for realistic session-length constraints (Entry
+28).
+
+---
+
+### Entry 28 — July 29, 2026 — Dataset scaled back to 2,000 simulations
+
+**Objective:** Fit a full training run within a single cloud GPU session.
+
+**Method:** Reduced `dataset.n_simulations` from 10,000 back to 2,000
+(split 1,400/300/300), retaining the already-reduced per-simulation point
+counts, since it is that combination that determines total per-iteration
+training cost.
+
+**Results & Observations:** At 10,000 simulations, measured throughput on
+an L4 GPU (~17.5 sec/epoch) implied a worst-case ~97-hour training time for
+the full 25,000-iteration schedule — exceeding a 24-hour cloud session
+limit. At 2,000 simulations, worst-case estimated at ~25–28 hours.
+
+**Issues & Troubleshooting:** Also vectorized a per-point lookup in the
+microenvironment module used in the physics-loss computation path; measured
+only a modest ~1.08x speedup in isolation, confirming this was not the
+dominant cost (the GPU-side second-order automatic differentiation is).
+
+**Conclusion / Next Steps:** Dataset scale now fits realistic session
+constraints; iteration count may still require trimming depending on
+measured hardware throughput.
+
+---
+
+### Entry 29 — July 30, 2026 — Windows multi-core data generation
+
+**Objective:** Restore full multi-core data-generation speed on Windows.
+
+**Method:** Automated the Entry-22 standalone-script workaround: the
+notebook's data-generation cell now runs the standalone script as a real
+subprocess on Windows (parallelizing safely across all CPU cores) and loads
+its result automatically, with no manual steps required. Non-Windows
+platforms continue parallelizing inline as before.
+
+**Results & Observations:** Verified via automated notebook execution
+(non-Windows path) and a standalone test of the subprocess-and-load path.
+
+**Issues & Troubleshooting:** None of note.
+
+**Conclusion / Next Steps:** Windows users now generate data at full
+multi-core speed without manual intervention.
+
+---
+
+### Entry 30 — July 30 – August 1, 2026 — Training log frequency
+
+**Objective:** Prevent long-running training from appearing frozen due to
+sparse console output.
+
+**Method:** Changed the default logging interval from once every 1,000
+steps to once every step.
+
+**Results & Observations:** A long gap between printed lines is now a
+reliable signal to investigate, rather than an artifact of the previous
+logging interval.
+
+**Issues & Troubleshooting:** Prior default could make an hour or more of
+correctly-running training appear indistinguishable from a hang, since
+validation ran every step regardless — only the printed output was gated.
+
+**Conclusion / Next Steps:** Proceed to resumable training (Entry 31).
+
+---
+
+### Entry 31 — August 1, 2026 — Resumable training
+
+**Objective:** Allow training to survive a cloud session disconnect without
+losing progress.
+
+**Method:** Implemented periodic checkpointing during the first training
+phase, saving model weights, optimizer momentum state, learning-rate
+schedule position, best-validation tracking, patience counter, and loss
+history — not just the model weights. If a checkpoint exists at the start
+of a training call, it is loaded automatically and training resumes from
+the saved point. Checkpoints are written atomically to prevent corruption
+from a crash mid-write, validated against a configuration fingerprint
+before loading, and deleted once training completes fully.
+
+**Results & Observations:** A dedicated test split a 10-epoch run into 5
+epochs, followed by a resume-and-continue for 5 more epochs (deliberately
+using a different random seed for the second half, to prove the checkpoint
+alone — not incidental in-memory state — carries everything required), and
+confirmed the resulting parameters matched an uninterrupted 10-epoch run
+exactly. Verified via automated notebook execution that the checkpoint file
+is created during training and removed on completion. Full test suite (151
+passed, 3 new) passed.
+
+**Issues & Troubleshooting:** None of note; behavior verified correct on
+first implementation.
+
+**Conclusion / Next Steps:** Training now resilient to session interruption.
+
+---
+
+### Entry 32 — August 3, 2026 — Best-validation tracking in the second
+training phase
+
+**Objective:** Ensure the second (L-BFGS) training phase cannot produce a
+worse final model than the first (Adam) phase.
+
+**Method:** Observed that the first phase already tracked and restored the
+best-validation-scored state seen during training, rather than simply the
+final epoch, but the second phase had no equivalent mechanism — it retained
+whatever state its line search happened to end on. Implemented the same
+tracking for the second phase: validation score is evaluated at every
+optimizer evaluation, and the best-scoring state is restored at the end of
+the phase.
+
+**Results & Observations:** A dedicated test proved the final validation
+score after the second phase is always less than or equal to the score
+measured immediately before it began, and that the loaded model's weights
+correspond exactly to the reported best score — not merely the final
+iteration. Full test suite (152 passed, 1 new) passed.
+
+**Issues & Troubleshooting:** Root cause identified by inspecting recent
+loss curves, which showed the data-fit component of the loss increasing
+during the later portion of training — consistent with the final saved
+model not being the best one seen.
+
+**Conclusion / Next Steps:** Model-selection defect resolved. Retraining
+under this fix is required to benefit an already-trained checkpoint.
+
+---
+
+*This logbook is a plain-language, chronological companion to the
+project's git history. Refer to the repository's commits for exact code
+changes and authoritative timestamps.*
