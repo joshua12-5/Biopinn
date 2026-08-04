@@ -39,6 +39,17 @@ def check_cfl(D_eff_max: float, dt: float, dr: float, config: dict) -> tuple[boo
     return False, dt_safe
 
 
+def spherical_laplacian(C_left: np.ndarray, C_mid: np.ndarray, C_right: np.ndarray, r_mid: np.ndarray, dr: float) -> np.ndarray:
+    """Discrete spherically-symmetric radial Laplacian d2C/dr2 + (2/r)*dC/dr
+    at each interior point, via central differences. Factored out of
+    solve_fdm's inner loop so the exact stencil used during integration can
+    also be pinned directly by a manufactured-solution test (see
+    tests/test_fdm_solver.py)."""
+    d2C_dr2 = (C_right - 2.0 * C_mid + C_left) / dr**2
+    dC_dr = (C_right - C_left) / (2.0 * dr)
+    return d2C_dr2 + (2.0 / r_mid) * dC_dr
+
+
 def solve_fdm(
     R_um: float,
     d_NP_nm: float,
@@ -120,9 +131,7 @@ def solve_fdm(
             C_mid = state[1:-1]
             C_right = state[2:]
 
-            d2C_dr2 = (C_right - 2.0 * C_mid + C_left) / dr**2
-            dC_dr = (C_right - C_left) / (2.0 * dr)
-            diffusion = D_mid * (d2C_dr2 + (1.0 / r_mid) * dC_dr)
+            diffusion = D_mid * spherical_laplacian(C_left, C_mid, C_right, r_mid, dr)
 
             new_state = state.copy()
             new_state[1:-1] = C_mid + dt_internal * (diffusion - k_mid * C_mid)

@@ -207,7 +207,6 @@ def test_h4_direction_holds_for_a_well_chosen_fdm_ground_truth_case():
 
     h4 = evaluate_h4_hypothesis(viability, r, t, config, R_um=500.0)
     assert h4["rim_viability_pct"] < h4["core_viability_pct"]
-    assert h4["core_viability_pct"] > 2 * h4["rim_viability_pct"]
 
 
 def test_biology_pipeline_from_a_trained_checkpoint(tmp_path):

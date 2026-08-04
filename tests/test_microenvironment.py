@@ -32,6 +32,22 @@ def test_stokes_einstein_matches_formula():
     assert D == pytest.approx(expected)
 
 
+def test_stokes_einstein_endpoint_values_match_known_physical_magnitude():
+    """Pins the two endpoint values against the physically correct magnitude
+    for this config's constants (k_B=1.380649e-23 J/K, T=310 K,
+    eta=1.2e-3 Pa*s): D_free = k_B*T/(3*pi*eta*d_NP) gives ~3.8e-11 m^2/s at
+    d_NP=10nm and ~1.9e-12 m^2/s at d_NP=200nm. A prior version of the
+    project's manuscript printed values ~5x lower than this (~7.3e-12 and
+    ~3.7e-13) -- that was a manuscript-prose error, not a bug in this
+    formula, but pinned here so a future regression in the formula or
+    constants would be caught."""
+    const = CONFIG["constants"]
+    D_10nm = stokes_einstein_diffusivity(10.0, const["T"], const["eta"], const["k_B"])
+    D_200nm = stokes_einstein_diffusivity(200.0, const["T"], const["eta"], const["k_B"])
+    assert D_10nm == pytest.approx(3.8e-11, rel=0.02)
+    assert D_200nm == pytest.approx(1.9e-12, rel=0.02)
+
+
 def test_radial_grid_shape_and_bounds():
     r = radial_grid(R_um=400.0, N_r=200, r_min_um=0.001)
     assert r.shape == (200,)

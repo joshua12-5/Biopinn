@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from src.config import load_config
-from src.fdm_solver import check_cfl, solve_fdm
+from src.fdm_solver import check_cfl, solve_fdm, spherical_laplacian
 
 CONFIG = load_config()
 
@@ -123,6 +123,36 @@ def test_solve_fdm_no_substepping_needed_when_already_stable():
     # n_substeps is a well-formed positive integer.
     assert result["n_substeps"] >= 1
     assert isinstance(result["n_substeps"], int)
+
+
+def test_spherical_laplacian_matches_manufactured_solution_r_squared():
+    """The spherically-symmetric Laplacian is d2f/dr2 + (2/r)*df/dr. For
+    f(r)=r^2 this evaluates analytically to 2 + (2/r)(2r) = 6, and central
+    differences are exact for a quadratic, so the discrete operator should
+    match 6 (almost) exactly. The old, cylindrical-coordinate 1/r coefficient
+    this project used to have would instead give 2 + (1/r)(2r) = 4 -- this
+    test directly discriminates the two, and pins the real production
+    stencil (spherical_laplacian, also used inside solve_fdm's time-stepping
+    loop), not a re-derivation of the formula."""
+    r = np.linspace(1.0, 10.0, 50)
+    dr = r[1] - r[0]
+    f = r**2
+    result = spherical_laplacian(f[:-2], f[1:-1], f[2:], r[1:-1], dr)
+    assert result == pytest.approx(6.0)
+
+
+def test_spherical_laplacian_matches_manufactured_solution_r_cubed():
+    """For f(r)=r^3, the spherical Laplacian is 6r + (2/r)(3r^2) = 12r.
+    Central differences aren't exact for a cubic first derivative (unlike
+    the quadratic case above), so this only holds up to O(dr^2) truncation
+    error -- checked with a loose relative tolerance rather than requiring
+    exactness."""
+    r = np.linspace(1.0, 10.0, 200)
+    dr = r[1] - r[0]
+    f = r**3
+    result = spherical_laplacian(f[:-2], f[1:-1], f[2:], r[1:-1], dr)
+    expected = 12.0 * r[1:-1]
+    assert result == pytest.approx(expected, rel=1e-3)
 
 
 def test_solve_fdm_time_varying_boundary_decays():

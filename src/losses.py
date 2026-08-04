@@ -14,14 +14,13 @@ PDE with the correct per-point D_eff(r) and k_d(r) from
 src/microenvironment.py, then convert the network's normalized derivatives
 back to physical derivatives before forming the residual.
 
-Governing PDE (matches the radial term src/fdm_solver.py actually solves,
-NOT the idealized "2/r" spherical form quoted at the top of the build
-prompt's scientific-model section -- the FDM-solver spec and the guide's own
-reference code both use "1/r"; using anything else here would make the
-physics loss fight the FDM-generated data loss over what PDE is even being
-solved):
+Governing PDE (matches the radial term src/fdm_solver.py actually solves --
+the spherically-symmetric Laplacian's first-derivative term is "2/r", not
+the cylindrical "1/r" the build prompt's reference code used; both this
+module and src/fdm_solver.py were corrected together so the physics loss and
+the FDM-generated data loss keep describing the same equation):
 
-    dC/dt = D_eff(r) * (d2C/dr2 + (1/r)*dC/dr) - k_d(r) * C
+    dC/dt = D_eff(r) * (d2C/dr2 + (2/r)*dC/dr) - k_d(r) * C
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ def _denormalize_params(param_cols: torch.Tensor, norm_stats: dict) -> dict[str,
 
 
 def pde_residual(model: BIOPINN, X: torch.Tensor, config: dict, norm_stats: dict) -> torch.Tensor:
-    """PDE residual dC/dt - D_eff*(d2C/dr2 + (1/r)*dC/dr) + k_d*C at each point in X."""
+    """PDE residual dC/dt - D_eff*(d2C/dr2 + (2/r)*dC/dr) + k_d*C at each point in X."""
     r_norm = X[:, R_COLUMN : R_COLUMN + 1].clone().detach().requires_grad_(True)
     t_norm = X[:, T_COLUMN : T_COLUMN + 1].clone().detach().requires_grad_(True)
     param_cols = X[:, PARAM_COLUMNS_START:].detach()
@@ -92,7 +91,7 @@ def pde_residual(model: BIOPINN, X: torch.Tensor, config: dict, norm_stats: dict
     k_d_field = torch.as_tensor(k_d_field_np, dtype=X.dtype, device=X.device).reshape(-1, 1)
 
     r_safe = torch.clamp(r_phys, min=1e-6)
-    laplacian = d2C_dr2 + (1.0 / r_safe) * dC_dr
+    laplacian = d2C_dr2 + (2.0 / r_safe) * dC_dr
     return dC_dt - D_eff * laplacian + k_d_field * C_phys
 
 
