@@ -7,6 +7,9 @@ optimize nanoparticle size and dose.
 
 > **Status:** all 14 build phases complete (0–13 per the original build
 > protocol, plus Phase 14: manuscript Results & Discussion asset generation).
+> See [LOGBOOK.md](LOGBOOK.md) for a plain-language, dated diary of how the
+> project was built, including what was tested and what went wrong along the
+> way.
 
 ## What this is
 
