@@ -12,6 +12,17 @@ module never reimplements the underlying physics, and never retrains.
 PNG+PDF figures and CSV tables to `results/paper/`, compiles the tables
 into a Word document, and writes a reproducibility manifest.
 
+The Fig/Table 4.X names below predate a later SOP (Statement of the Problem)
+requiring the compiled document to be organized around four specific
+research questions instead of a dissertation chapter's sequential order;
+`table_rq1b_concentration_by_zone`/`fig_rq1b_concentration_by_zone` and
+`table_rq1c_subtherapeutic_by_diameter`/`fig_rq1c_subtherapeutic_vs_diameter`
+were added to fill the two sub-questions (concentration distribution across
+tumor zones; sub-therapeutic regions) the existing Fig/Table 4.X set didn't
+already cover as a function of nanoparticle diameter -- see
+scripts/generate_results.py's RQ_SECTIONS for how everything, old and new,
+maps onto RQ1(a/b/c)-RQ4.
+
 A note on parameter sensitivity: the manuscript's baseline configuration
 (R=400um, d_NP=100nm, C0=10uM, k_d=0.01/hr, t=72hr) is the same "typical
 demo" regime that earlier phases (see tests/test_optimize.py and
@@ -405,6 +416,50 @@ def fig_4_9_hetero_vs_homog(config: dict, solved: dict | None = None):
     }
 
 
+def fig_rq1b_concentration_by_zone(config: dict, diameter_sweep: dict | None = None):
+    """RQ1b -- Mean FDM-reference concentration in each tumor zone at t=t_max,
+    across the nanoparticle-diameter sweep (grouped bar chart)."""
+    df, meta = table_rq1b_concentration_by_zone(config, diameter_sweep=diameter_sweep)
+    zone_cols = ["Proliferating Rim Conc. (μM)", "Quiescent Zone Conc. (μM)", "Necrotic Core Conc. (μM)"]
+    colors = [ZONE_COLORS["proliferating_rim"], ZONE_COLORS["quiescent_zone"], ZONE_COLORS["necrotic_core"]]
+    x = np.arange(len(df))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+    for i, (col, color) in enumerate(zip(zone_cols, colors)):
+        ax.bar(x + (i - 1) * width, df[col], width, label=col.split(" Conc.")[0], color=color)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{d:g}" for d in df["d_NP (nm)"]])
+    ax.set_xlabel("Nanoparticle diameter d_NP (nm)")
+    ax.set_ylabel("Mean concentration (μM)")
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+
+    return fig, {**meta, "caption": "Mean Concentration by Tumor Zone Across Nanoparticle Diameters"}
+
+
+def fig_rq1c_subtherapeutic_vs_diameter(config: dict, diameter_sweep: dict | None = None):
+    """RQ1c -- Sub-therapeutic tumor region (radius and volume fraction) as a
+    function of nanoparticle diameter, from the FDM ground-truth field."""
+    df, meta = table_rq1c_subtherapeutic_by_diameter(config, diameter_sweep=diameter_sweep)
+
+    fig, ax1 = plt.subplots(figsize=(7, 5.5))
+    ax1.plot(df["d_NP (nm)"], df["Sub-therapeutic Zone Radius (μm)"], "o-", color="#b3462c", linewidth=2, markersize=6, label="Zone radius")
+    ax1.set_xlabel("Nanoparticle diameter d_NP (nm)")
+    ax1.set_ylabel("Sub-therapeutic zone radius (μm)", color="#b3462c")
+    ax1.tick_params(axis="y", labelcolor="#b3462c")
+    ax1.grid(alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(df["d_NP (nm)"], df["Sub-therapeutic Volume Fraction (%)"], "s--", color="#1c7c74", linewidth=2, markersize=6, label="Volume fraction")
+    ax2.set_ylabel("Sub-therapeutic volume fraction (%)", color="#1c7c74")
+    ax2.tick_params(axis="y", labelcolor="#1c7c74")
+    fig.tight_layout()
+
+    return fig, {**meta, "caption": "Sub-therapeutic Tumor Region vs. Nanoparticle Diameter"}
+
+
 def fig_4_10_effectiveness_surface(model, config: dict, norm_stats: dict, grid_result: dict | None = None):
     """Fig 4.10 -- Treatment Effectiveness Surface eta(d_NP, C0), baseline R, optimum marked."""
     params = baseline_params(config)
@@ -616,6 +671,61 @@ def table_4_5_viability_summary(model, config: dict, norm_stats: dict, n_r: int 
                 "Core Viability (%)": round(zone_mean("necrotic_core"), 1),
                 "Overall Kill Fraction (%)": round(eta * 100.0, 1),
                 "Resistance Risk Fraction (%)": round(resistance["resistant_volume_fraction"] * 100.0, 1),
+            }
+        )
+    df = pd.DataFrame(rows)
+    return df, {"params": params}
+
+
+def table_rq1b_concentration_by_zone(config: dict, diameter_sweep: dict | None = None) -> tuple[pd.DataFrame, dict]:
+    """RQ1b -- Mean FDM-reference concentration in each of the three tumor
+    zones at t=t_max, across the nanoparticle-diameter sweep. Uses the FDM
+    ground-truth field (same physics as Table 4.1/4.2), since this asks about
+    the diffusion coefficient's effect on the underlying physics, not the
+    PINN's accuracy at reproducing it (that's RQ2 / Table 4.3)."""
+    params = baseline_params(config)
+    sweep = diameter_sweep or solve_diameter_sweep(config)
+
+    rows = []
+    for d_NP, fdm in sorted(sweep.items()):
+        r, C = fdm["r"], fdm["C"]
+        oxygen = oxygen_gradient(r, config, R=params["R_um"])
+        zones = assign_zones(r, oxygen, config)
+        C_final = C[-1, :]
+
+        def zone_mean(zone_name: str) -> float:
+            mask = zones == zone_name
+            return _volume_average(C_final[mask], r[mask]) if mask.any() else float("nan")
+
+        rows.append(
+            {
+                "d_NP (nm)": d_NP,
+                "Proliferating Rim Conc. (μM)": round(zone_mean("proliferating_rim"), 4),
+                "Quiescent Zone Conc. (μM)": round(zone_mean("quiescent_zone"), 4),
+                "Necrotic Core Conc. (μM)": round(zone_mean("necrotic_core"), 4),
+            }
+        )
+    df = pd.DataFrame(rows)
+    return df, {"params": params}
+
+
+def table_rq1c_subtherapeutic_by_diameter(config: dict, diameter_sweep: dict | None = None) -> tuple[pd.DataFrame, dict]:
+    """RQ1c -- Sub-therapeutic (under-dosed) tumor region as a function of
+    nanoparticle diameter, from the FDM ground-truth field (same convention
+    as Table 4.6's hetero-vs-homog comparison, via src.optimize._summarize_field,
+    but swept across every diameter instead of compared at one fixed d_NP)."""
+    params = baseline_params(config)
+    sweep = diameter_sweep or solve_diameter_sweep(config)
+
+    rows = []
+    for d_NP, fdm in sorted(sweep.items()):
+        summary = _summarize_field(fdm["C"], fdm["r"], fdm["t"], config)
+        rows.append(
+            {
+                "d_NP (nm)": d_NP,
+                "Sub-therapeutic Zone Radius (μm)": round(summary["subtherapeutic_zone_radius_um"], 1),
+                "Sub-therapeutic Volume Fraction (%)": round(summary["resistance_risk_fraction"] * 100.0, 1),
+                "Overall Kill Fraction (%)": round(summary["kill_fraction"] * 100.0, 1),
             }
         )
     df = pd.DataFrame(rows)

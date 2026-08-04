@@ -253,6 +253,20 @@ def test_fig_4_9_hetero_vs_homog():
     R.plt.close(fig)
 
 
+def test_fig_rq1b_concentration_by_zone():
+    fig, meta = R.fig_rq1b_concentration_by_zone(FAST_CONFIG)
+    assert isinstance(fig, matplotlib.figure.Figure)
+    assert meta["caption"] == "Mean Concentration by Tumor Zone Across Nanoparticle Diameters"
+    R.plt.close(fig)
+
+
+def test_fig_rq1c_subtherapeutic_vs_diameter():
+    fig, meta = R.fig_rq1c_subtherapeutic_vs_diameter(FAST_CONFIG)
+    assert isinstance(fig, matplotlib.figure.Figure)
+    assert meta["caption"] == "Sub-therapeutic Tumor Region vs. Nanoparticle Diameter"
+    R.plt.close(fig)
+
+
 def test_fig_4_10_effectiveness_surface(model):
     fig, meta = R.fig_4_10_effectiveness_surface(model, FAST_CONFIG, NORM_STATS)
     assert isinstance(fig, matplotlib.figure.Figure)
@@ -301,6 +315,31 @@ def test_table_4_5_viability_summary(model):
     assert len(df) == len(FAST_CONFIG["paper"]["sweeps"]["d_NP_nm"])
     for col in ("Outer Rim Viability (%)", "Quiescent Zone Viability (%)", "Core Viability (%)", "Overall Kill Fraction (%)", "Resistance Risk Fraction (%)"):
         assert col in df.columns
+
+
+def test_table_rq1b_concentration_by_zone():
+    df, meta = R.table_rq1b_concentration_by_zone(FAST_CONFIG)
+    assert len(df) == len(FAST_CONFIG["paper"]["sweeps"]["d_NP_nm"])
+    assert list(df.columns) == [
+        "d_NP (nm)",
+        "Proliferating Rim Conc. (μM)",
+        "Quiescent Zone Conc. (μM)",
+        "Necrotic Core Conc. (μM)",
+    ]
+    assert meta["params"] == FAST_CONFIG["paper"]["baseline"]
+
+
+def test_table_rq1c_subtherapeutic_by_diameter():
+    df, meta = R.table_rq1c_subtherapeutic_by_diameter(FAST_CONFIG)
+    assert len(df) == len(FAST_CONFIG["paper"]["sweeps"]["d_NP_nm"])
+    assert list(df.columns) == [
+        "d_NP (nm)",
+        "Sub-therapeutic Zone Radius (μm)",
+        "Sub-therapeutic Volume Fraction (%)",
+        "Overall Kill Fraction (%)",
+    ]
+    assert (df["Sub-therapeutic Zone Radius (μm)"] >= 0).all()
+    assert (df["Sub-therapeutic Volume Fraction (%)"] >= 0).all()
 
 
 def test_table_4_6_hetero_vs_homog():

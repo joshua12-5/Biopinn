@@ -5,16 +5,18 @@
 Loads the trained checkpoint (+ optionally a w_phys=0 ablation baseline) and
 the held-out test set, computes every figure and table via src/results.py,
 and writes them to results/paper/:
-  - fig_*.png / .pdf   (300 DPI, 10 figures; no caption baked into the image --
+  - fig_*.png / .pdf   (300 DPI, 12 figures; no caption baked into the image --
     APA figures carry data/axes/legend only, see FIGURE_CAPTIONS_<mode>.md)
-  - table_*.csv        (9 tables)
-  - BIOPINN_results_tables_<mode>.docx   (9 tables, APA three-line borders,
+  - table_*.csv        (11 tables)
+  - BIOPINN_results_tables_<mode>.docx   (tables compiled under Research
+    Question headings -- see RQ_OUTLINE below -- APA three-line borders,
     "Table N" + italicized title, "Note." footnotes)
   - FIGURE_CAPTIONS_<mode>.md            (APA figure captions: "Figure N" +
     italicized title, external to the image files themselves)
   - results_manifest_<mode>.json         (source/config/key-values per asset)
 
---numbering controls the caption/filename scheme (<mode> above):
+--numbering controls the caption/filename scheme (<mode> above) for the
+original Fig/Table 4.X set:
   - "chapter"    (default): dissertation-chapter-style, e.g. Table 4.1,
     fig_4_1_concentration_heatmap.png -- identical to this script's original
     numbering.
@@ -23,7 +25,15 @@ and writes them to results/paper/:
     independent sequences (Figure 1..10, Table 1..9), per APA convention.
 Run the script twice, once per --numbering value, to get both -- filenames
 never collide between the two modes, so both can live in results/paper/
-at once.
+at once. The two RQ1b/RQ1c assets (added to directly answer the sub-parts of
+Research Question 1 that the original Fig/Table 4.X set didn't cover as a
+function of nanoparticle diameter) keep a fixed "rq1b"/"rq1c" label under
+both numbering modes, since they aren't part of that chapter sequence.
+
+The compiled .docx groups every table (and references every figure) under
+four Research Question headings, matching the project's Statement of the
+Problem -- see RQ_OUTLINE below for exactly what evidence answers each
+question and sub-question.
 
 Never retrains -- consumes artifacts/ exactly as the other scripts/*.py do.
 Table 8 (ablation) is skipped with a clear note if no baseline checkpoint
@@ -59,6 +69,81 @@ from src.model import load_checkpoint
 from src.optimize import optimize_all_radii, speedup_study
 
 APA_FONT = "Times New Roman"
+
+# Compiled-document outline: groups every table (and references every
+# figure) under the project's four Statement-of-the-Problem research
+# questions, instead of the old flat Fig/Table 4.1..4.10 sequence. Each
+# entry is one of:
+#   ("h1", text)                    -- top-level "Research Question N" heading
+#   ("h2", text)                    -- sub-question heading (RQ1's a/b/c)
+#   ("table", chapter_number)       -- one table via _add_table_to_doc
+#   ("figref", chapter_number)      -- a one-line pointer to the standalone
+#                                      figure file (figures aren't embedded
+#                                      in the compiled document -- see
+#                                      FIGURE_CAPTIONS_<mode>.md, matching
+#                                      this project's existing APA
+#                                      figures-are-external-files design)
+#   ("text", key)                   -- a short prose paragraph, built from
+#                                      real computed values (see _RQ4_TEXT_KEY)
+RQ_OUTLINE = [
+    ("h1", "Research Question 1: What is the diffusion coefficient effect of "
+           "simulated nanoparticle diameter on:"),
+    ("h2", "a. Drug penetration depth"),
+    ("table", "4.2"), ("table", "4.4"), ("figref", "4.6"),
+    ("h2", "b. Concentration distribution across tumor zones"),
+    ("table", "rq1b"), ("figref", "rq1b"),
+    ("h2", "c. Sub-therapeutic regions"),
+    ("table", "rq1c"), ("figref", "rq1c"),
+    ("table", "4.6"), ("figref", "4.9"),
+    ("h1", "Research Question 2: Accuracy of the trained BIOPINN model in "
+           "reproducing the finite-difference reference concentration field "
+           "on the held-out test set (RMSE, MAE, R², L2 relative error)"),
+    ("table", "4.3"), ("figref", "4.4"), ("figref", "4.3"),
+    ("h1", "Research Question 3: Predicted cell survivability and cytotoxicity "
+           "during drug penetration and exposure"),
+    ("table", "4.5"), ("figref", "4.7"), ("figref", "4.8"),
+    ("h1", "Research Question 4: What combination of nanoparticle diameter and "
+           "dosing produces the greatest predicted tumor cell kill, and why?"),
+    ("table", "4.7"), ("figref", "4.10"), ("text", "rq4_interpretation"),
+    ("h1", "Supporting Material"),
+    ("table", "4.1"), ("table", "4.8"), ("table", "4.9"),
+    ("figref", "4.1"), ("figref", "4.2"), ("figref", "4.5"),
+]
+
+
+def _rq4_interpretation(grid_result: dict, config: dict) -> str:
+    """Short, computed (not canned) interpretation of RQ4's optimum: where it
+    sits within the searched grid, and the Stokes-Einstein reasoning (D_free
+    scales as 1/d_NP -- already established in src/microenvironment.py and
+    tested in tests/test_microenvironment.py) for why that side of the range
+    tends to win."""
+    opt_cfg = config["optimization"]
+    d_lo, d_hi = opt_cfg["d_NP_grid_nm"]
+    c_lo, c_hi = opt_cfg["C0_grid_uM"]
+    d_star, c_star, eta = grid_result["d_NP_star_nm"], grid_result["C0_star_uM"], grid_result["max_eta"]
+
+    d_frac = (d_star - d_lo) / (d_hi - d_lo) if d_hi > d_lo else 0.5
+    c_frac = (c_star - c_lo) / (c_hi - c_lo) if c_hi > c_lo else 0.5
+    d_side = "smaller" if d_frac < 0.5 else "larger"
+    diffusion_word = "faster" if d_side == "smaller" else "slower"
+    reach_word = "more" if d_side == "smaller" else "less"
+    c_side = "lower" if c_frac < 0.5 else "higher"
+
+    return (
+        f"Across the searched grid (d_NP in [{d_lo:g}, {d_hi:g}] nm, C0 in "
+        f"[{c_lo:g}, {c_hi:g}] μM) at the baseline tumor radius, the combination "
+        f"maximizing the volume-averaged kill fraction η was d_NP* = {d_star:.1f} nm "
+        f"and C0* = {c_star:.2f} μM, reaching η = {eta * 100.0:.1f}%. By the "
+        f"Stokes-Einstein relation (Table RQ1b/RQ1c and Table 4.2), free diffusivity "
+        f"D_free scales as 1/d_NP, so on diffusion alone a {d_side} nanoparticle would "
+        f"be expected to diffuse {diffusion_word} and reach {reach_word} of the tumor "
+        f"volume within the exposure window; the optimal diameter found here sits "
+        f"toward that {d_side} end of the searched range, and the optimal dose toward "
+        f"the {c_side} end of the searched concentration range. Kill fraction also "
+        f"depends on local exposure duration and decay rate, not diffusion reach alone, "
+        f"so this diffusion-based reasoning explains the general tendency rather than "
+        f"fully determining the exact optimum."
+    )
 
 
 def _sanitize_for_json(obj):
@@ -303,6 +388,16 @@ def main() -> None:
     stem = f"fig_{_file_number('4.8', args.numbering)}_cytotoxicity_evolution"
     manifest["figures"]["4.8"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": _display_number("4.8", args.numbering), **meta}
 
+    print("  Fig RQ1b -- concentration by tumor zone across nanoparticle diameters")
+    fig, meta = R.fig_rq1b_concentration_by_zone(config, diameter_sweep=diameter_sweep)
+    stem = "fig_rq1b_concentration_by_zone"
+    manifest["figures"]["rq1b"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": "RQ1b", **meta}
+
+    print("  Fig RQ1c -- sub-therapeutic region vs. nanoparticle diameter")
+    fig, meta = R.fig_rq1c_subtherapeutic_vs_diameter(config, diameter_sweep=diameter_sweep)
+    stem = "fig_rq1c_subtherapeutic_vs_diameter"
+    manifest["figures"]["rq1c"] = {"files": R._save_figure(fig, output_dir, stem), "display_number": "RQ1c", **meta}
+
     print("  solving the heterogeneous/homogeneous D_eff comparison (shared by Table 4.6 and Fig 4.9)...")
     hetero_homog = R.solve_hetero_and_homogeneous(config)
 
@@ -341,6 +436,12 @@ def main() -> None:
     print("  Table 4.5 -- viability summary")
     tables["4.5"] = R.table_4_5_viability_summary(model, config, norm_stats)
 
+    print("  Table RQ1b -- concentration by tumor zone across nanoparticle diameters")
+    tables["rq1b"] = R.table_rq1b_concentration_by_zone(config, diameter_sweep=diameter_sweep)
+
+    print("  Table RQ1c -- sub-therapeutic region vs. nanoparticle diameter")
+    tables["rq1c"] = R.table_rq1c_subtherapeutic_by_diameter(config, diameter_sweep=diameter_sweep)
+
     print("  Table 4.6 -- heterogeneous vs. homogeneous comparison")
     tables["4.6"] = R.table_4_6_hetero_vs_homog(config, solved=hetero_homog)
 
@@ -357,9 +458,18 @@ def main() -> None:
         if result is None:
             continue
         df, meta = result
-        csv_path = output_dir / f"table_{_file_number(number, args.numbering)}.csv"
+        # rq1b/rq1c aren't part of the Fig/Table 4.X chapter sequence -- they're
+        # tied to specific SOP sub-questions, so they keep a fixed "RQ1b"/"RQ1c"
+        # label under both numbering modes instead of feeding _file_number/
+        # _display_number (which assume the "N.M" chapter-number format).
+        if number.startswith("rq"):
+            csv_path = output_dir / f"table_{number}.csv"
+            display_number = "RQ" + number[2:]
+        else:
+            csv_path = output_dir / f"table_{_file_number(number, args.numbering)}.csv"
+            display_number = _display_number(number, args.numbering)
         df.to_csv(csv_path, index=False, encoding="utf-8")
-        manifest["tables"][number] = {"csv": str(csv_path), "display_number": _display_number(number, args.numbering), **meta}
+        manifest["tables"][number] = {"csv": str(csv_path), "display_number": display_number, **meta}
 
     # ----------------------------------------------------------------- #
     # Hypothesis summary (Table 4.9) -- assembled from the tables/figures above
@@ -430,27 +540,53 @@ def main() -> None:
     docx_path = output_dir / f"BIOPINN_results_tables_{args.numbering}.docx"
     print(f"\nCompiling {docx_path.name}...")
     doc = Document()
-    doc.add_heading("BIOPINN — Results & Discussion: Tables", level=1)
+    doc.add_heading("BIOPINN — Results & Discussion", level=1)
     doc.add_paragraph(
         f"Every value in this document was computed from the trained checkpoint, the held-out "
         f"{len(sims)}-simulation test set, and the analysis routines in src/ -- see "
         f"results_manifest_{args.numbering}.json in this folder for the exact source and "
-        f"configuration behind every number."
+        f"configuration behind every number. Tables and figures are organized below by the "
+        f"research question they answer; see FIGURE_CAPTIONS_{args.numbering}.md for the figures "
+        f"themselves (not embedded here, per APA figure convention)."
     )
 
-    order = [
-        ("4.1", f"FDM Simulation Summary Statistics (Baseline: R={baseline_p['R_um']:.0f} μm, d_NP={baseline_p['d_NP_nm']:.0f} nm)"),
-        ("4.2", "Maximum Penetration Depth at t=72hr Across Nanoparticle Diameters"),
-        ("4.3", f"PINN Test Set Evaluation Metrics (Mean ± SD, N={len(sims)} test simulations)"),
-        ("4.4", f"Penetration Depth Analysis Across Nanoparticle Sizes (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM, t={baseline_p['t_max_hr']:.0f}hr)"),
-        ("4.5", f"Viability Analysis Summary at t={baseline_p['t_max_hr']:.0f}hr (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM)"),
-        ("4.6", f"Heterogeneous vs. Homogeneous D_eff Model Comparison (d_NP={baseline_p['d_NP_nm']:.0f}nm, R={baseline_p['R_um']:.0f}μm, t={baseline_p['t_max_hr']:.0f}hr)"),
-        ("4.7", "Optimization Results: Optimal Nanoparticle Parameters for Different Tumor Sizes"),
-        ("4.8", "Ablation Study: PINN vs. Unconstrained NN Baseline"),
-        ("4.9", "Hypothesis Evaluation Summary"),
-    ]
-    for number, caption in order:
-        display_number = _display_number(number, args.numbering)
+    table_captions = {
+        "4.1": f"FDM Simulation Summary Statistics (Baseline: R={baseline_p['R_um']:.0f} μm, d_NP={baseline_p['d_NP_nm']:.0f} nm)",
+        "4.2": "Maximum Penetration Depth at t=72hr Across Nanoparticle Diameters",
+        "4.3": f"PINN Test Set Evaluation Metrics (Mean ± SD, N={len(sims)} test simulations)",
+        "4.4": f"Penetration Depth Analysis Across Nanoparticle Sizes (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM, t={baseline_p['t_max_hr']:.0f}hr)",
+        "4.5": f"Viability Analysis Summary at t={baseline_p['t_max_hr']:.0f}hr (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM)",
+        "4.6": f"Heterogeneous vs. Homogeneous D_eff Model Comparison (d_NP={baseline_p['d_NP_nm']:.0f}nm, R={baseline_p['R_um']:.0f}μm, t={baseline_p['t_max_hr']:.0f}hr)",
+        "4.7": "Optimization Results: Optimal Nanoparticle Parameters for Different Tumor Sizes",
+        "4.8": "Ablation Study: PINN vs. Unconstrained NN Baseline",
+        "4.9": "Hypothesis Evaluation Summary",
+        "rq1b": f"Mean Concentration by Tumor Zone Across Nanoparticle Diameters (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM, t={baseline_p['t_max_hr']:.0f}hr)",
+        "rq1c": f"Sub-therapeutic Tumor Region vs. Nanoparticle Diameter (R={baseline_p['R_um']:.0f}μm, C0={baseline_p['C0_uM']:.0f}μM, t={baseline_p['t_max_hr']:.0f}hr)",
+    }
+    rq4_text = _rq4_interpretation(radius_results[baseline_R], config)
+
+    for block in RQ_OUTLINE:
+        kind = block[0]
+        if kind == "h1":
+            doc.add_heading(block[1], level=2)
+            continue
+        if kind == "h2":
+            doc.add_heading(block[1], level=3)
+            continue
+        if kind == "text":
+            doc.add_paragraph(rq4_text if block[1] == "rq4_interpretation" else "")
+            continue
+        if kind == "figref":
+            number = block[1]
+            fig_entry = manifest["figures"][number]
+            png_name = Path(fig_entry["files"]["png"]).name
+            doc.add_paragraph(f"See Figure {fig_entry['display_number']} ({fig_entry.get('caption', '')}) -- {png_name}.")
+            continue
+
+        # kind == "table"
+        number = block[1]
+        display_number = manifest["tables"].get(number, {}).get("display_number") or _display_number(number, args.numbering)
+        caption = table_captions[number]
         if number == "4.8" and tables["4.8"] is None:
             missing_para = doc.add_paragraph()
             missing_run = missing_para.add_run(f"Table {display_number}")
@@ -475,17 +611,25 @@ def main() -> None:
     # Figure captions (APA style, external to the images -- see
     # _write_figure_captions)
     # ----------------------------------------------------------------- #
-    figure_order = ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9", "4.10"]
+    figure_order = ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "rq1b", "4.7", "4.8", "rq1c", "4.9", "4.10"]
     captions_path = _write_figure_captions(manifest["figures"], figure_order, args.numbering, output_dir)
     print(f"  saved {captions_path}")
 
     # ----------------------------------------------------------------- #
     # Manifest
     # ----------------------------------------------------------------- #
+    manifest["research_questions"] = {
+        "RQ1a": {"question": "Diffusion coefficient effect of nanoparticle diameter on drug penetration depth", "evidence": ["4.2", "4.4", "4.6"]},
+        "RQ1b": {"question": "Diffusion coefficient effect of nanoparticle diameter on concentration distribution across tumor zones", "evidence": ["rq1b"]},
+        "RQ1c": {"question": "Diffusion coefficient effect of nanoparticle diameter on sub-therapeutic regions", "evidence": ["rq1c", "4.6"]},
+        "RQ2": {"question": "BIOPINN accuracy vs. the FDM reference on the held-out test set (RMSE, MAE, R², L2 relative error)", "evidence": ["4.3"]},
+        "RQ3": {"question": "Predicted cell survivability and cytotoxicity during drug penetration and exposure", "evidence": ["4.5", "4.7", "4.8"]},
+        "RQ4": {"question": "Nanoparticle diameter / dosing combination maximizing predicted tumor cell kill, and why", "evidence": ["4.7", "4.10"]},
+    }
     manifest_path = output_dir / f"results_manifest_{args.numbering}.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(_sanitize_for_json(manifest), f, indent=2)
-    print(f"\nSaved 10 figures (PNG+PDF), 9 tables (CSV), {docx_path.name}, {captions_path.name}, and {manifest_path.name} to {output_dir}")
+    print(f"\nSaved {len(manifest['figures'])} figures (PNG+PDF), {len(manifest['tables'])} tables (CSV), {docx_path.name}, {captions_path.name}, and {manifest_path.name} to {output_dir}")
 
     print("\n--- Hypothesis summary ---")
     for key, h in hypotheses.items():
