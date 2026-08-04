@@ -25,6 +25,7 @@ from src.train import (
     train,
     train_adam_phase,
     train_lbfgs_phase,
+    _val_score,
 )
 
 BASE_CONFIG = load_config()
@@ -48,6 +49,14 @@ FAST_CONFIG["training"]["convergence"]["patience_epochs"] = 10_000  # effectivel
 
 def _dataset():
     return build_dataset(FAST_CONFIG, seed=9, save=False)
+
+
+def test_val_score_uses_the_configs_loss_weights():
+    config = copy.deepcopy(FAST_CONFIG)
+    config["loss"]["w_data"] = 3.0
+    config["loss"]["w_phys"] = 0.5
+
+    assert _val_score(2.0, 4.0, config) == pytest.approx(3.0 * 2.0 + 0.5 * 4.0)
 
 
 def test_train_adam_phase_runs_and_logs_all_components():
@@ -183,8 +192,13 @@ def test_train_lbfgs_phase_never_regresses_below_pre_phase_validation_score():
     guarantee the last one generalizes best -- this proves the phase always
     leaves the model at least as good, by validation score, as it started:
     it must track and restore the best-scoring state seen, not just
-    whatever L-BFGS happened to end on."""
-    from src.train import _evaluate_validation
+    whatever L-BFGS happened to end on. The guaranteed quantity is the same
+    loss.w_data/w_phys-weighted score _val_score uses for selection, not the
+    raw unweighted val_data + val_phys sum -- a weighted score can improve
+    even on a run where the raw sum gets worse, since a big physics-residual
+    gain can outweigh a small data-fit regression once weighted the same way
+    the training objective itself is."""
+    from src.train import _evaluate_validation, _val_score
 
     result = _dataset()
     model = BIOPINN(FAST_CONFIG)
@@ -193,11 +207,12 @@ def test_train_lbfgs_phase_never_regresses_below_pre_phase_validation_score():
 
     train_adam_phase(model, train_batch, val_batch, FAST_CONFIG, result["stats"], log_every=0)
     pre_val_data, pre_val_phys = _evaluate_validation(model, val_batch, FAST_CONFIG, result["stats"])
-    pre_score = pre_val_data + pre_val_phys
+    pre_score = _val_score(pre_val_data, pre_val_phys, FAST_CONFIG)
 
     lbfgs_result = train_lbfgs_phase(model, train_batch, val_batch, FAST_CONFIG, result["stats"], log_every=0)
 
-    assert lbfgs_result["val_data"] + lbfgs_result["val_phys"] <= pre_score + 1e-6
+    post_score = _val_score(lbfgs_result["val_data"], lbfgs_result["val_phys"], FAST_CONFIG)
+    assert post_score <= pre_score + 1e-6
     assert len(lbfgs_result["history"]["val_data"]) == lbfgs_result["closure_evaluations"]
     assert len(lbfgs_result["history"]["val_phys"]) == lbfgs_result["closure_evaluations"]
 

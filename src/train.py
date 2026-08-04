@@ -134,6 +134,21 @@ def _evaluate_validation(model: BIOPINN, val_batch: dict, config: dict, norm_sta
     return val_data, val_phys
 
 
+def _val_score(val_data: float, val_phys: float, config: dict) -> float:
+    """Best-checkpoint selection metric, used by both training phases.
+
+    Weighted by the same loss.w_data/w_phys the training objective itself
+    uses, rather than a flat val_data + val_phys sum -- the two terms live on
+    very different scales (phys can swing over several orders of magnitude
+    while data moves by a few percent), so an unweighted sum lets a large
+    physics-residual improvement mask a real regression in data fit. Using
+    the training objective's own weights keeps "best checkpoint" consistent
+    with what the model is actually being optimized for.
+    """
+    weights = config["loss"]
+    return weights["w_data"] * val_data + weights["w_phys"] * val_phys
+
+
 def train_adam_phase(
     model: BIOPINN,
     batch: dict,
@@ -259,7 +274,7 @@ def train_adam_phase(
         history["val_data"].append(val_data)
         history["val_phys"].append(val_phys)
 
-        val_score = val_data + val_phys
+        val_score = _val_score(val_data, val_phys, config)
         if val_score < best_val_score:
             best_val_score = val_score
             best_state = copy.deepcopy(model.state_dict())
@@ -319,9 +334,10 @@ def train_lbfgs_phase(
     and restores the best validation-scored state instead of just whatever
     epoch happened to run last. This mirrors that: every closure call also
     evaluates val_data/val_phys, and the model is left at whichever state
-    (pre-L-BFGS or any point during L-BFGS) had the lowest val_data +
-    val_phys, so L-BFGS can only improve on the Adam phase's result, never
-    quietly regress it.
+    (pre-L-BFGS or any point during L-BFGS) had the lowest _val_score
+    (loss.w_data/w_phys-weighted, matching the training objective -- see
+    _val_score), so L-BFGS can only improve on the Adam phase's result,
+    never quietly regress it.
     """
     lbfgs_cfg = config["training"]["lbfgs"]
     max_points_per_chunk = config["training"].get("max_points_per_chunk")
@@ -342,7 +358,7 @@ def train_lbfgs_phase(
     call_count = {"n": 0}
     best = {
         "state": pre_lbfgs_state,
-        "score": pre_val_data + pre_val_phys,
+        "score": _val_score(pre_val_data, pre_val_phys, config),
         "val_data": pre_val_data,
         "val_phys": pre_val_phys,
     }
@@ -361,7 +377,7 @@ def train_lbfgs_phase(
         val_data, val_phys = _evaluate_validation(model, val_batch, config, norm_stats)
         history["val_data"].append(val_data)
         history["val_phys"].append(val_phys)
-        val_score = val_data + val_phys
+        val_score = _val_score(val_data, val_phys, config)
         if np.isfinite(val_score) and val_score < best["score"]:
             best.update(state=copy.deepcopy(model.state_dict()), score=val_score, val_data=val_data, val_phys=val_phys)
 

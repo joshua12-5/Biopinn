@@ -123,7 +123,14 @@ model:
 # Composite loss weights
 # ---------------------------------------------------------------------------
 loss:
-  w_data: 1.0
+  # w_data raised from the original 1.0 -- training logs showed data loss
+  # drifting upward for the back half of a run (roughly 0.18 -> 0.21) while
+  # phys loss kept improving, i.e. the optimizer was trading data accuracy
+  # for physics-residual accuracy since nothing in the objective resisted
+  # that trade at 1:1. This isn't a magic number: if a retrained model still
+  # under-predicts relative to the FDM reference in validation plots, try
+  # raising it further (up to ~5.0) before touching anything else.
+  w_data: 2.0
   w_phys: 1.0
   w_bc: 10.0
   w_neu: 10.0
