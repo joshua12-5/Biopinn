@@ -210,7 +210,13 @@ def test_physics_loss_chunked_matches_unchunked():
 
     unchunked = physics_loss(model, batch["collocation_X"], FAST_CONFIG, result["stats"]).item()
     chunked = physics_loss_chunked(model, batch["collocation_X"], FAST_CONFIG, result["stats"], max_points_per_chunk=7)
-    assert chunked == pytest.approx(unchunked, abs=1e-5)
+    # Relative, not absolute, tolerance: chunked summation reorders float32
+    # additions vs. the single-shot path, and with Fourier features enabled
+    # by default (larger, higher-frequency gradients through second-order
+    # autograd) the loss magnitude itself is bigger than when this test's
+    # original abs=1e-5 tolerance was written -- an absolute bound sized for
+    # single-digit values is too tight for float32 precision at ~90.
+    assert chunked == pytest.approx(unchunked, rel=1e-5, abs=1e-8)
 
 
 def test_physics_loss_chunked_no_chunking_needed_matches_direct_call():
