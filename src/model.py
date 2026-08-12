@@ -1,6 +1,6 @@
 """BIOPINN network architecture.
 
-The 5x64 tanh fully-connected network with Xavier init and the hard-IC
+The 5x96 tanh fully-connected network with Xavier init and the hard-IC
 output transform C_NN = sigmoid(f_theta(x)) * t_norm. Input `x` is the
 7-column point layout produced by src/data_pipeline.py:
 
