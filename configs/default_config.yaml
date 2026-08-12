@@ -115,19 +115,22 @@ model:
   init: "xavier_normal"
   hard_ic_transform: true      # C_NN = sigmoid(f_theta(x)) * t_norm
   fourier_features:
-    # Enabled after validation plots (post w_data=4.0) showed the network
-    # tracking the FDM reference well almost everywhere, but rounding off
-    # the sharp concentration rise right near the tumor surface (r close to
-    # R) instead of matching its steepness -- a plain MLP's well-known
-    # "spectral bias" against locally sharp/high-frequency spatial
-    # features. This encoding (sin/cos of random linear projections of the
-    # input) gives the network high-frequency basis functions to work with
-    # directly, rather than relying on it to construct them from tanh
-    # layers alone. sigma=1.0/n_features=32 are untuned starting values --
-    # if the near-surface rise is still too smoothed out after retraining,
-    # try raising sigma (higher representable frequency) before anything
-    # else here.
-    enabled: true
+    # Tried enabled=true (sigma=1.0) to fix the network rounding off the
+    # sharp concentration rise near the tumor surface -- made things
+    # categorically worse, not better: a real training run collapsed to
+    # predicting a flat constant across the entire radius (loss curves show
+    # total/data/bc loss all going completely flat by iteration ~1500, with
+    # zero further learning for the rest of the run). Likely cause: with 7
+    # input dimensions feeding the same random projection, the effective
+    # frequency of the sin/cos encoding scales with the summed variance
+    # across all 7 columns, not just r_norm/t_norm -- so sigma=1.0 produced
+    # a far higher-frequency encoding than intended for what's actually a
+    # smooth signal, making the loss landscape too rough to optimize at
+    # all rather than just resolving one sharp feature. Reverted to
+    # disabled. If this gets revisited, try a much smaller sigma (e.g.
+    # 0.05-0.2) and/or only encoding r_norm/t_norm rather than all 7
+    # columns -- don't just flip enabled=true with untuned defaults again.
+    enabled: false
     n_features: 32
     sigma: 1.0
 
