@@ -23,11 +23,12 @@ for interactive exploration.
 
 ## Scientific model summary
 
-- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (2/r)dC/dr] - k_d*C`,
+- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (1/r)dC/dr] - k_d*C`,
   Dirichlet at the tumor surface (`C(R,t) = C0`), Neumann symmetry at the
-  center (`dC/dr = 0`). The `2/r` term is the correct spherically-symmetric
-  Laplacian; `src/fdm_solver.py` and `src/losses.py` are kept consistent
-  with each other on this.
+  center (`dC/dr = 0`). (The FDM solver spec and the implementation guide's
+  own reference code both use the `1/r` cylindrical-radial term rather than
+  the idealized `2/r` spherical form quoted elsewhere; `src/fdm_solver.py`
+  and `src/losses.py` are kept consistent with each other on this.)
 - **Three-zone microenvironment:** proliferating rim / quiescent zone /
   necrotic core, each with a distinct diffusion correction factor
   (`f_zone`, applied to Stokes–Einstein `D_free`) and drug-binding-rate
@@ -36,7 +37,7 @@ for interactive exploration.
 - **Biological response:** Hill-equation drug-induced death rate →
   time-integrated survival fraction (hazard form, always in `(0,1]`) →
   viability `V(r,t)` and cytotoxicity `Cyt(r,t)` maps → penetration depth.
-- **PINN:** 5×96 tanh MLP, Xavier init, **parametric 7-dim input**
+- **PINN:** 5×64 tanh MLP, Xavier init, **parametric 7-dim input**
   `(r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm)` so
   *one* trained model generalizes across the full 5D physical parameter
   space (extends the base "(r_norm, t_norm)" skeleton — required so the
@@ -137,7 +138,7 @@ BIOPINN/
 | `microenvironment.py` | Radial grid, Stokes–Einstein `D_free`, steady-state oxygen gradient, three-zone assignment, `D_eff(r)` / `k_d(r)` fields (batched or pointwise). | FDM solver, losses, biology, evaluate, optimize, dashboard |
 | `fdm_solver.py` | Forward-Euler solver for the governing PDE, with a CFL guard that auto-reduces the internal time step (decoupled from the stored output grid, so memory stays bounded even for the worst-case small-R/small-d_NP corner) and Dirichlet/Neumann boundary handling. | Colab data generation, `optimize.py`'s H3 comparison |
 | `data_pipeline.py` | Latin Hypercube Sampling over the 5D parameter space, parallel FDM dataset generation, data/collocation/BC/IC point sampling, normalization, train/val/test tensor + `sim_params.json` export. | Colab notebook |
-| `model.py` | The `BIOPINN` network (5×96 tanh MLP, optional Random Fourier Features, hard-IC output transform) + checkpoint load/save. | training, everything downstream |
+| `model.py` | The `BIOPINN` network (5×64 tanh MLP, optional Random Fourier Features, hard-IC output transform) + checkpoint load/save. | training, everything downstream |
 | `losses.py` | The five composite loss terms (data, physics/PDE-residual via autograd, Dirichlet BC, Neumann BC, IC), plus `composite_loss_chunked`/`physics_loss_chunked` -- gradient-accumulated, memory-bounded equivalents (identical resulting gradient, bounded peak GPU memory) used when `training.max_points_per_chunk` is set. | training, evaluation (PDE-residual stats), ablation |
 | `train.py` | Two-phase Adam → L-BFGS training engine: gradient clipping, StepLR, `w_phys` warmup ramp, NaN-recovery safeguard, checkpointing. Training is full-batch (every iteration sees the whole train split at once); `configs/default_config.yaml`'s `training.max_points_per_chunk` (default 1,000,000) caps peak memory by computing/backward()-ing each loss term in point-count-bounded chunks instead of one shot -- needed since the PDE-residual term's second-order autograd over millions of collocation points can exceed GPU memory otherwise (`CUDA out of memory`). Unset it to restore the original single-shot behavior on a GPU with enough VRAM to not need it. **Resumable**: `training.checkpoint_every` (default 100) periodically saves model weights + Adam's momentum buffers + LR schedule position (not just the model) to `<model_checkpoint>_resume.pt` during the Adam phase; if that file exists the next time `train()` runs, it resumes from the exact epoch it left off at -- bit-identical to an uninterrupted run, not just "close enough" -- instead of restarting from epoch 0. The file is deleted once training fully completes. Set to 0 to disable. Both phases track the best validation-scored state seen and restore it at the end, rather than keeping whatever epoch/closure happened to run last -- L-BFGS's line search in particular can wander through many closures with no guarantee the final one generalizes best, so it can only improve on the Adam phase's result, never quietly regress it. The score is `loss.w_data * val_data + loss.w_phys * val_phys` (the same weights the training objective itself uses), not an unweighted sum -- since `phys` can swing over orders of magnitude while `data` moves by a few percent, an unweighted sum could let a big physics-residual win mask a real regression in data fit. | Colab notebook, `ablation.py` (baseline training) |
 | `biology.py` | Hill-equation death rate → survival fraction → viability/cytotoxicity maps → penetration depth; queries a loaded checkpoint for `C(r,t)` over an arbitrary parameter combination. | evaluation, optimization, dashboard |

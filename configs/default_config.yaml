@@ -110,18 +110,7 @@ model:
   input_dim: 7
   output_dim: 1               # C_norm
   n_layers: 5
-  # Widened from 64 -- validation plots kept showing the network rounding
-  # off the sharp concentration rise near the tumor surface even after
-  # loss.w_data was pushed 1.0 -> 6.0 without that specific shape improving,
-  # evidence the bottleneck is representational capacity (a smooth,
-  # band-limited tanh network's ability to fit a sharply-curving function),
-  # not the data/physics loss balance -- so widening (more capacity per
-  # layer) rather than raising w_data again or reaching for another
-  # untuned architecture change (Fourier features already collapsed
-  # training once at the wrong settings; see model.fourier_features below).
-  # Depth (n_layers) left unchanged since widening doesn't add the
-  # optimization difficulty extra depth can with tanh activations.
-  n_neurons: 96
+  n_neurons: 64
   activation: "tanh"
   init: "xavier_normal"
   hard_ic_transform: true      # C_NN = sigmoid(f_theta(x)) * t_norm

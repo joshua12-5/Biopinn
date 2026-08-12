@@ -1,6 +1,6 @@
 """Physics-informed vs. unconstrained ablation study (H5).
 
-Trains an identical-architecture baseline network (5x96 tanh, same
+Trains an identical-architecture baseline network (5x64 tanh, same
 train/val/test split and normalization stats -- see
 src.data_pipeline.load_processed_dataset) but with the physics loss switched
 off (w_phys=0: data + Dirichlet + Neumann + IC only), then compares it
