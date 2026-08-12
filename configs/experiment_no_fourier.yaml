@@ -1,0 +1,19 @@
+# Experiment: evaluate a checkpoint trained before Random Fourier Features
+# became the default (model.fourier_features.enabled: true in
+# default_config.yaml). A checkpoint's weight shapes are fixed at whatever
+# architecture it was trained with -- loading one into a differently-shaped
+# network (e.g. the Fourier encoding's extra input width) fails with a
+# state_dict mismatch. This override changes nothing except that one flag,
+# so every other setting (dataset, paths, training schedule) still points
+# at the same real artifacts/dataset as default_config.yaml.
+#
+# Only use this to evaluate an already-trained, pre-Fourier-features
+# checkpoint as-is. Don't use it for new training runs -- that would just
+# reproduce the near-surface curve-rounding issue Fourier features were
+# enabled to fix.
+
+experiment_name: "biopinn_default_no_fourier"
+
+model:
+  fourier_features:
+    enabled: false
