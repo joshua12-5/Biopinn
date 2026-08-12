@@ -166,11 +166,17 @@ def test_composite_loss_chunked_matches_unchunked_value_and_gradient():
 
     losses_chunked = composite_loss_chunked(model_chunked, batch, FAST_CONFIG, result["stats"], max_points_per_chunk=7)
 
+    # Relative, not just absolute, tolerance: with Fourier features enabled
+    # by default the loss/gradient magnitudes and the depth of second-order
+    # autograd through them are both larger than when these tolerances were
+    # first tuned, so chunked-vs-unchunked float32 summation-order
+    # differences need more headroom -- see the near-identical fix in
+    # test_physics_loss_chunked_matches_unchunked below.
     for key in ("total", "data", "phys", "bc", "neu", "ic"):
-        assert torch.allclose(losses_chunked[key], losses_unchunked[key], atol=1e-5), key
+        assert torch.allclose(losses_chunked[key], losses_unchunked[key], rtol=1e-4, atol=1e-6), key
 
     for p_unchunked, p_chunked in zip(model_unchunked.parameters(), model_chunked.parameters()):
-        assert torch.allclose(p_chunked.grad, p_unchunked.grad, atol=1e-5, rtol=1e-4)
+        assert torch.allclose(p_chunked.grad, p_unchunked.grad, atol=1e-4, rtol=1e-3)
 
 
 def test_composite_loss_chunked_backward_updates_parameters():
