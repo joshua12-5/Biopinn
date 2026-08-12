@@ -23,12 +23,11 @@ for interactive exploration.
 
 ## Scientific model summary
 
-- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (1/r)dC/dr] - k_d*C`,
+- **Governing PDE:** `dC/dt = D_eff(r)*[d2C/dr2 + (2/r)dC/dr] - k_d*C`,
   Dirichlet at the tumor surface (`C(R,t) = C0`), Neumann symmetry at the
-  center (`dC/dr = 0`). (The FDM solver spec and the implementation guide's
-  own reference code both use the `1/r` cylindrical-radial term rather than
-  the idealized `2/r` spherical form quoted elsewhere; `src/fdm_solver.py`
-  and `src/losses.py` are kept consistent with each other on this.)
+  center (`dC/dr = 0`). The `2/r` term is the correct spherically-symmetric
+  Laplacian; `src/fdm_solver.py` and `src/losses.py` are kept consistent
+  with each other on this.
 - **Three-zone microenvironment:** proliferating rim / quiescent zone /
   necrotic core, each with a distinct diffusion correction factor
   (`f_zone`, applied to Stokes–Einstein `D_free`) and drug-binding-rate
