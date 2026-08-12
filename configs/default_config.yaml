@@ -147,13 +147,22 @@ loss:
   # further that run (~0.18 -> ~0.3, a bigger relative rise than before),
   # and the validation plot flipped from under- to over-predicting relative
   # to the FDM reference -- same underlying data-vs-physics tension, just
-  # landing on the other side under the corrected PDE. Raised to 4.0. Not a
-  # magic number: if a retrained model still visibly diverges from the FDM
-  # reference, try raising it further (up to ~6-8) before touching anything
-  # else, or look at enabling loss.w_phys_ramp with a longer ramp_steps (the
-  # drift in both runs so far started around iteration ~8500-9000, so a
-  # ramp needs to extend past that point to actually delay it).
-  w_data: 4.0
+  # landing on the other side under the corrected PDE. Raised to 4.0, which
+  # measurably helped (data-loss drift resolved, loss curves calm) but left
+  # a real, smaller gap: the network rounds off the sharp concentration
+  # rise right near the tumor surface instead of matching its steepness.
+  # Raised again to 6.0 to push further in the same, already-validated
+  # direction, rather than reaching for an architecture change again (a
+  # Fourier-features attempt at fixing that same rounding-off collapsed
+  # training entirely -- see model.fourier_features above -- so further
+  # architecture changes should be tuned far more carefully, not tried as
+  # a quick default flip). Not a magic number: if a retrained model still
+  # visibly diverges from the FDM reference, try raising it further (up to
+  # ~8-10) before touching anything else, or look at enabling
+  # loss.w_phys_ramp with a longer ramp_steps (the drift in every run so
+  # far started around iteration ~8500-9000, so a ramp needs to extend
+  # past that point to actually delay it).
+  w_data: 6.0
   w_phys: 1.0
   w_bc: 10.0
   w_neu: 10.0
