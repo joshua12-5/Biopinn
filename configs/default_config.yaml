@@ -110,7 +110,7 @@ model:
   input_dim: 7
   output_dim: 1               # C_norm
   n_layers: 5
-  n_neurons: 64
+  n_neurons: 96
   activation: "tanh"
   init: "xavier_normal"
   hard_ic_transform: true      # C_NN = sigmoid(f_theta(x)) * t_norm
