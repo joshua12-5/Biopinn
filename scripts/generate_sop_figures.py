@@ -10,10 +10,8 @@ Writes 300 DPI PNG+PDF pairs to results/sop/:
   RQ1a  rq1a_penetration_depth_vs_time.png/.pdf
   RQ1b  rq1b_concentration_by_zone.png/.pdf
   RQ1c  rq1c_subtherapeutic_vs_diameter.png/.pdf
-  RQ2   rq2_predicted_vs_reference_scatter.png/.pdf   (RMSE/MAE/R2/L2 evidence,
-        annotated with the pooled R^2 -- the one figure RQ2 actually asks
-        for; a single-case FDM-vs-PINN profile comparison was dropped, since
-        it's an illustrative extra, not RMSE/MAE/R2/L2 evidence)
+  RQ2   (no figure -- RQ2's accuracy metrics are reported as a table only,
+        see scripts/generate_sop_tables.py; no FDM-comparison plot)
   RQ3   rq3_spatial_viability.png/.pdf
         rq3_cytotoxicity_evolution.png/.pdf
   RQ4   rq4_effectiveness_surface.png/.pdf
@@ -21,7 +19,7 @@ Writes 300 DPI PNG+PDF pairs to results/sop/:
 Never retrains -- consumes artifacts/ exactly like scripts/run_evaluation.py.
 
 Usage:
-    python scripts/generate_sop_figures.py [--experiment NAME] [--n-jobs N]
+    python scripts/generate_sop_figures.py [--experiment NAME]
 """
 
 from __future__ import annotations
@@ -33,12 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import numpy as np
-import torch
-
 from src import results as R
 from src.config import load_config, resolve_path
-from src.evaluate import resolve_test_simulations
 from src.model import load_checkpoint
 from src.optimize import optimize_all_radii
 
@@ -46,7 +40,6 @@ from src.optimize import optimize_all_radii
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--experiment", default=None, help="Experiment config name (default: default_config.yaml)")
-    parser.add_argument("--n-jobs", type=int, default=1, help="Parallel workers for re-solving the test set's FDM reference")
     args = parser.parse_args()
 
     config = load_config(args.experiment)
@@ -57,20 +50,10 @@ def main() -> None:
         print("Run notebooks/biopinn_train.ipynb on Colab first, then drop its artifacts here.")
         sys.exit(1)
 
-    processed_dir = resolve_path(config, "processed")
-    if not (processed_dir / "test.npz").exists():
-        print(f"No processed test set found at {processed_dir}.")
-        print("Run notebooks/biopinn_train.ipynb (or src.data_pipeline.build_dataset) first.")
-        sys.exit(1)
-
     print(f"Loading checkpoint: {checkpoint_path}")
     model = load_checkpoint(str(checkpoint_path), config)
     with open(resolve_path(config, "normalization_stats"), encoding="utf-8") as f:
         norm_stats = json.load(f)
-
-    print(f"Re-solving FDM reference for the test set (n_jobs={args.n_jobs})...")
-    sims = resolve_test_simulations(config, n_jobs=args.n_jobs)
-    print(f"  {len(sims)} test simulations resolved.")
 
     output_dir = resolve_path(config, "results") / "sop"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -88,9 +71,6 @@ def main() -> None:
 
     print("RQ1c -- sub-therapeutic region vs. diameter")
     figures.append(("rq1c_subtherapeutic_vs_diameter", "RQ1c", R.fig_rq1c_subtherapeutic_vs_diameter(config, diameter_sweep=diameter_sweep)))
-
-    print("RQ2 -- predicted vs. reference scatter (full test set)")
-    figures.append(("rq2_predicted_vs_reference_scatter", "RQ2", R.fig_4_4_scatter_pred_vs_ref(model, config, norm_stats, sims)))
 
     print("RQ3 -- spatial viability at t=t_max")
     figures.append(("rq3_spatial_viability", "RQ3", R.fig_4_7_viability_t72(model, config, norm_stats)))
