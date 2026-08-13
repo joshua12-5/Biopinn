@@ -90,7 +90,12 @@ def main() -> None:
     tables.append(("rq1c_subtherapeutic_by_diameter", "RQ1c", R.table_rq1c_subtherapeutic_by_diameter(config, diameter_sweep=diameter_sweep)))
 
     print("RQ2 -- BIOPINN accuracy vs. the FDM reference (RMSE, MAE, R2, L2 relative error)")
-    tables.append(("rq2_accuracy_metrics", "RQ2", R.table_4_3_pinn_metrics(model, config, norm_stats, sims, collocation_X)))
+    rq2_df, rq2_meta = R.table_4_3_pinn_metrics(model, config, norm_stats, sims, collocation_X)
+    # RQ2 as worded just asks for the accuracy metrics themselves, not a
+    # pass/fail comparison against the dissertation-chapter's publication
+    # acceptance thresholds -- drop those two columns for the SOP table.
+    rq2_df = rq2_df.drop(columns=["Publication Threshold", "Hypothesis Outcome"])
+    tables.append(("rq2_accuracy_metrics", "RQ2", (rq2_df, rq2_meta)))
 
     print("RQ3 -- predicted cell survivability and cytotoxicity")
     tables.append(("rq3_viability_summary", "RQ3", R.table_4_5_viability_summary(model, config, norm_stats)))
