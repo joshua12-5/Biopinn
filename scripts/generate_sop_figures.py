@@ -10,8 +10,10 @@ Writes 300 DPI PNG+PDF pairs to results/sop/:
   RQ1a  rq1a_penetration_depth_vs_time.png/.pdf
   RQ1b  rq1b_concentration_by_zone.png/.pdf
   RQ1c  rq1c_subtherapeutic_vs_diameter.png/.pdf
-  RQ2   rq2_predicted_vs_reference_scatter.png/.pdf   (RMSE/MAE/R2/L2 evidence)
-        rq2_pinn_vs_fdm_profile_comparison.png/.pdf   (supporting visual)
+  RQ2   rq2_predicted_vs_reference_scatter.png/.pdf   (RMSE/MAE/R2/L2 evidence,
+        annotated with the pooled R^2 -- the one figure RQ2 actually asks
+        for; a single-case FDM-vs-PINN profile comparison was dropped, since
+        it's an illustrative extra, not RMSE/MAE/R2/L2 evidence)
   RQ3   rq3_spatial_viability.png/.pdf
         rq3_cytotoxicity_evolution.png/.pdf
   RQ4   rq4_effectiveness_surface.png/.pdf
@@ -89,8 +91,6 @@ def main() -> None:
 
     print("RQ2 -- predicted vs. reference scatter (full test set)")
     figures.append(("rq2_predicted_vs_reference_scatter", "RQ2", R.fig_4_4_scatter_pred_vs_ref(model, config, norm_stats, sims)))
-    print("RQ2 -- PINN vs. FDM profile comparison (supporting visual)")
-    figures.append(("rq2_pinn_vs_fdm_profile_comparison", "RQ2", R.fig_4_3_pinn_vs_fdm_t24(model, config, norm_stats, diameter_sweep=diameter_sweep)))
 
     print("RQ3 -- spatial viability at t=t_max")
     figures.append(("rq3_spatial_viability", "RQ3", R.fig_4_7_viability_t72(model, config, norm_stats)))
