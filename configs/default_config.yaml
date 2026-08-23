@@ -164,7 +164,23 @@ loss:
   # past that point to actually delay it).
   w_data: 6.0
   w_phys: 1.0
-  w_bc: 10.0
+  # w_bc raised from 10.0 -- a 5x96 run's training_loss_curves plot showed
+  # bc_loss (raw, unweighted) dropping from ~0.52 to ~0.4 in the first few
+  # iterations and then staying completely flat for the rest of the Adam
+  # phase and through L-BFGS (~20,500 iterations total, zero further
+  # improvement). At w_bc=10.0 that stuck ~0.4 raw value contributes ~4.0 to
+  # a total loss that plateaus around ~5.5-6 -- i.e. the (weighted) BC term
+  # alone was ~70% of total loss and never resolving. The corresponding
+  # validation_sanity_check-style plot showed the PINN prediction not
+  # actually reaching C0 at r=R (the Dirichlet surface value), a visible gap
+  # between the PINN curve and the FDM reference right at the boundary --
+  # consistent with the surface condition being underweighted relative to
+  # how hard it is to satisfy. Doubled to 20.0 to see if BC loss can be
+  # pushed off that plateau; if it's still stuck flat at the new weight
+  # after a retrain, that's evidence the problem isn't weighting at all
+  # (worth trying a hard-enforced BC via an output transform instead, the
+  # same trick already used for the IC -- see model.hard_ic_transform).
+  w_bc: 20.0
   w_neu: 10.0
   w_ic: 10.0
   w_phys_ramp:                 # troubleshooting safeguard: ramp w_phys if NaN

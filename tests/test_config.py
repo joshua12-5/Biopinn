@@ -7,7 +7,7 @@ def test_default_config_loads():
     config = load_config()
     assert config["model"]["n_layers"] == 5
     assert config["model"]["n_neurons"] == 96
-    assert config["loss"]["w_bc"] == 10.0
+    assert config["loss"]["w_bc"] == 20.0
     assert config["dataset"]["n_simulations"] == 2000
 
 
