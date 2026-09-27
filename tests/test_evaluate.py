@@ -195,6 +195,50 @@ def test_evaluate_h2_hypothesis_shape_and_types():
     assert isinstance(result["pass"], bool)
     for key in ("depth_10nm_um", "depth_200nm_um", "difference_um"):
         assert np.isfinite(result[key])
+    assert result["t_hr"] == pytest.approx(24.0)
+
+
+@pytest.mark.parametrize("h2_time", [24.0, 12.0, 72.0])
+def test_evaluate_h2_uses_configured_time(monkeypatch, h2_time):
+    """H2 reads its evaluation time from evaluation.hypotheses.H2_time_hr
+    (24hr default) while the t_max_hr model input stays at the 72hr scenario;
+    the 1uM absolute threshold and >100um target are unchanged."""
+    import src.evaluate as ev
+
+    seen = []
+
+    def fake_predict(model, r, t, sim_params, norm_stats):
+        seen.append((np.asarray(t).copy(), dict(sim_params)))
+        # 10nm: above 1uM everywhere; 200nm: above 1uM only in the outer 150um.
+        R = r[-1]
+        above = np.ones_like(r) if sim_params["d_NP_nm"] == 10.0 else (r >= R - 150.0).astype(float)
+        return (0.5 + 1.5 * above)[None, :].repeat(len(t), axis=0)
+
+    monkeypatch.setattr(ev, "predict_concentration_field", fake_predict)
+    config = copy.deepcopy(CONFIG)
+    config["evaluation"]["hypotheses"]["H2_time_hr"] = h2_time
+    result = ev.evaluate_h2_hypothesis(None, {}, config)
+
+    assert result["t_hr"] == pytest.approx(h2_time)
+    assert result["penetration_threshold_uM"] == pytest.approx(1.0)
+    assert result["target_um"] == pytest.approx(100.0)
+    for t, sim_params in seen:
+        np.testing.assert_allclose(t, [h2_time])
+        assert sim_params["t_max_hr"] == pytest.approx(72.0)
+    assert result["depth_10nm_um"] == pytest.approx(400.0, abs=0.01)  # r_min = 0.001um
+    assert 145.0 <= result["depth_200nm_um"] <= 150.0
+    assert result["pass"] is True
+
+
+def test_h2_time_defaults_and_legacy():
+    from src.evaluate import h2_time_hr
+
+    assert h2_time_hr(CONFIG) == pytest.approx(24.0)
+    assert h2_time_hr(load_config("experiment_ntd")) == pytest.approx(24.0)
+    assert h2_time_hr(load_config("experiment_legacy_5param")) == pytest.approx(72.0)
+    no_key = copy.deepcopy(CONFIG)
+    del no_key["evaluation"]["hypotheses"]["H2_time_hr"]
+    assert h2_time_hr(no_key) == pytest.approx(72.0)
 
 
 def test_evaluate_h4_over_test_set_aggregates_correctly():

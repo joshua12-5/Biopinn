@@ -79,7 +79,7 @@ def print_report(report: dict) -> None:
         f"rmse={h1['rmse_uM']:.4e} r2={h1['r2']:.4f} -> {_mark(h1['pass'])}"
     )
     print(
-        f"  H2 (10nm vs 200nm penetration diff > {h2['target_um']}um @ R=400um, t=72hr): "
+        f"  H2 (10nm vs 200nm penetration diff > {h2['target_um']}um @ R=400um, t={h2['t_hr']:g}hr): "
         f"10nm={h2['depth_10nm_um']:.1f}um 200nm={h2['depth_200nm_um']:.1f}um "
         f"diff={h2['difference_um']:.1f}um -> {_mark(h2['pass'])}"
     )

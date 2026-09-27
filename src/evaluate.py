@@ -209,6 +209,12 @@ def evaluate_test_set(model, sims: list[dict], norm_stats: dict, config: dict) -
     return {"global": global_metrics, "decomposed": decomposed}
 
 
+def h2_time_hr(config: dict) -> float:
+    """Evaluation time for H2 (evaluation.hypotheses.H2_time_hr). Falls back
+    to the original 72hr for configs that predate the key."""
+    return float(config["evaluation"]["hypotheses"].get("H2_time_hr", 72.0))
+
+
 def evaluate_h2_hypothesis(
     model,
     norm_stats: dict,
@@ -218,19 +224,28 @@ def evaluate_h2_hypothesis(
     k_d_per_hr: float = 0.01,
     k_el_per_hr: float | None = None,
 ) -> dict:
-    """H2: at t=72hr and R=400um, the penetration-depth difference between a
-    10nm and a 200nm nanoparticle exceeds 100um (smaller NPs diffuse faster
-    and so penetrate deeper). `k_el_per_hr` defaults to the paper baseline
-    (0 if k_el isn't enabled in the config)."""
+    """H2: at t = evaluation.hypotheses.H2_time_hr (24hr by default; the
+    legacy 5-parameter config keeps 72hr) and R=400um, the penetration-depth
+    difference between a 10nm and a 200nm nanoparticle exceeds 100um (smaller
+    NPs diffuse faster and so penetrate deeper). `k_el_per_hr` defaults to the
+    paper baseline (0 if k_el isn't enabled in the config).
+
+    The simulation-duration input (t_max_hr) stays at the paper baseline's
+    72hr scenario; only the evaluation time changes. With the decaying
+    surface boundary (k_el > 0) the 72hr surface concentration is already
+    below the 1uM absolute threshold, which is why H2 moved to 24hr
+    (docs/NTD_ADAPTATION.md)."""
     k_el_per_hr = default_k_el(config) if k_el_per_hr is None else k_el_per_hr
     threshold_uM = concentration_threshold_uM(config, C0_uM)
     hyp_cfg = config["evaluation"]["hypotheses"]
     fdm_cfg = config["fdm"]
     r = radial_grid(R_um, fdm_cfg["N_r"], fdm_cfg["r_min_um"])
-    t = np.array([72.0])
+    t_eval_hr = h2_time_hr(config)
+    t_max_hr = max(float(config.get("paper", {}).get("baseline", {}).get("t_max_hr", 72.0)), t_eval_hr)
+    t = np.array([t_eval_hr])
 
     def depth_for(d_NP_nm: float) -> float:
-        sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": 72.0,
+        sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr,
                       "k_el_per_hr": k_el_per_hr}
         C_pred = predict_concentration_field(model, r, t, sim_params, norm_stats)
         return float(penetration_depth_from_concentration(C_pred, r, C0_uM, threshold_uM=threshold_uM)[0])
@@ -245,6 +260,7 @@ def evaluate_h2_hypothesis(
         "depth_200nm_um": depth_200,
         "difference_um": difference,
         "target_um": hyp_cfg["H2_penetration_diff_um"],
+        "t_hr": t_eval_hr,
         "k_el_per_hr": k_el_per_hr,
         "penetration_threshold_uM": threshold_uM,
     }

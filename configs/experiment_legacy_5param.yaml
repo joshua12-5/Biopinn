@@ -1,6 +1,6 @@
 # Legacy setup: the original constant-C0 boundary, 5 sampled parameters,
 # 7-column model input, relative (0.1*C0) penetration threshold and
-# final-time under-dose zone -- i.e. BIOPINN exactly as it was before the
+# final-time under-dose zone and H2 evaluated at 72hr -- i.e. BIOPINN exactly as it was before the
 # Nano-Tumor Database clearance adaptation (docs/NTD_ADAPTATION.md).
 #
 # Use it to load/evaluate a checkpoint trained before that change, or to
@@ -23,3 +23,5 @@ biology:
 evaluation:
   penetration_threshold:
     mode: "relative"
+  hypotheses:
+    H2_time_hr: 72.0   # original H2 evaluation time

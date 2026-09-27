@@ -296,6 +296,8 @@ evaluation:
   hypotheses:
     H1_rmse_target_uM: 0.05
     H2_penetration_diff_um: 100.0
+    H2_time_hr: 24.0          # evaluation time for H2 (was 72hr; with k_el>0 the 72hr surface
+                              # concentration is < 1uM, so both depths are 0 -- docs/NTD_ADAPTATION.md)
     H5_residual_improvement_factor: 10.0
     H6_speedup_orders_of_magnitude: 2.0
 

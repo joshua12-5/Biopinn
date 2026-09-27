@@ -507,7 +507,7 @@ def main() -> None:
             "evidence": "Table 4.3", "pass": bool(h1_meta["H1_pass_on_pooled_metrics"]),
         },
         "H2": {
-            "name": "NP Size vs. Depth", "expected": "72hr penetration-depth difference (10nm vs. 200nm) > 100 μm",
+            "name": "NP Size vs. Depth", "expected": f"{h2['t_hr']:g}hr penetration-depth difference (10nm vs. 200nm) > {h2['target_um']:g} μm",
             "evidence": "Table 4.4", "pass": bool(h2["pass"]),
         },
         "H3": {

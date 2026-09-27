@@ -55,6 +55,7 @@ from src.evaluate import (
     compute_pde_residual_stats,
     concentration_threshold_uM,
     evaluate_test_set,
+    h2_time_hr,
     penetration_depth_from_concentration,
 )
 from src.fdm_solver import solve_fdm
@@ -619,7 +620,8 @@ def table_4_3_pinn_metrics(model, config: dict, norm_stats: dict, sims: list[dic
 
 
 def table_4_4_penetration_analysis(model, config: dict, norm_stats: dict, diameter_sweep: dict | None = None) -> tuple[pd.DataFrame, dict]:
-    """Table 4.4 -- Penetration Depth Analysis Across Nanoparticle Sizes.
+    """Table 4.4 -- Penetration Depth Analysis Across Nanoparticle Sizes
+    (H2's evidence; H2 is judged at evaluation.hypotheses.H2_time_hr).
 
     Pen. depth and tumor-volume-reached columns are PINN-predicted (the
     pharmacodynamic module's own input, per the Methodology chapter);
@@ -628,6 +630,8 @@ def table_4_4_penetration_analysis(model, config: dict, norm_stats: dict, diamet
     """
     params = baseline_params(config)
     sweep = diameter_sweep or solve_diameter_sweep(config)
+    h2_t = h2_time_hr(config)
+    extra_h2_col = not (np.isclose(h2_t, 24.0) or np.isclose(h2_t, params["t_max_hr"]))
 
     rows = []
     for d_NP, fdm in sorted(sweep.items()):
@@ -641,17 +645,22 @@ def table_4_4_penetration_analysis(model, config: dict, norm_stats: dict, diamet
 
         idx_24 = int(np.argmin(np.abs(t - 24.0)))
         idx_72 = int(np.argmin(np.abs(t - params["t_max_hr"])))
-        rows.append(
-            {
-                "d_NP (nm)": d_NP,
-                "Pen. Depth 24hr (μm)": round(float(pen_pred[idx_24]), 1),
-                "Pen. Depth 72hr (μm)": round(float(pen_pred[idx_72]), 1),
-                "Tumor Volume Reached (%)": round(float(pen_pred[idx_72]) / params["R_um"] * 100.0, 1),
-                "PINN RMSE (μm)": round(rmse, 2),
-            }
-        )
+        row = {
+            "d_NP (nm)": d_NP,
+            "Pen. Depth 24hr (μm)": round(float(pen_pred[idx_24]), 1),
+            "Pen. Depth 72hr (μm)": round(float(pen_pred[idx_72]), 1),
+        }
+        # H2's evaluation time (evaluation.hypotheses.H2_time_hr) is normally
+        # one of the two columns above (24hr default, 72hr legacy); add it
+        # explicitly if it's configured to anything else.
+        if extra_h2_col:
+            idx_h2 = int(np.argmin(np.abs(t - h2_t)))
+            row[f"Pen. Depth {h2_t:g}hr (μm)"] = round(float(pen_pred[idx_h2]), 1)
+        row["Tumor Volume Reached (%)"] = round(float(pen_pred[idx_72]) / params["R_um"] * 100.0, 1)
+        row["PINN RMSE (μm)"] = round(rmse, 2)
+        rows.append(row)
     df = pd.DataFrame(rows)
-    return df, {"params": params}
+    return df, {"params": params, "H2_time_hr": h2_t}
 
 
 def table_4_5_viability_summary(model, config: dict, norm_stats: dict, n_r: int = 150, n_t: int = 60) -> tuple[pd.DataFrame, dict]:

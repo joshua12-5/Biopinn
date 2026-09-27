@@ -141,6 +141,8 @@ README).
   `tests/test_k_el_adaptation.py`. The new tests cover the legacy layout
   round-trip, 5-key stats with a 7-input model, the decaying boundary in the
   FDM output, threshold modes, and peak vs final.
+  After the H2 time change: **172 passed** (4 new H2 tests in
+  `tests/test_evaluate.py`).
 - Dev-scale end-to-end run with `experiment_ntd` (40 sims, N_r = 50):
   - **Data:** `generate_dataset.py` gives `data_X` of shape (11200, 8).
   - **Training:** 300 Adam + 25 L-BFGS iterations on CPU in about 50 s.
@@ -164,14 +166,77 @@ README).
 
 ### Consequences to expect when you retrain
 
-- **H2** is evaluated at t = 72 h only. With k_el at the baseline, the surface
-  concentration at 72 h (≈ 0.07 µM) is already below the 1 µM threshold, so
-  both penetration depths are 0 and H2 can't pass. Consider measuring
-  penetration as the maximum over time, or at the time of peak exposure.
+- **H2 now evaluated at 24 h (was 72 h).** See
+  [H2 evaluation time](#h2-evaluation-time-72-h--24-h) below. The FDM
+  ground truth still fails H2 at 24 h.
 - The H3 demo regime (C0 = 0.105 µM, `make_figures.py` / `test_optimize.py`)
   was tuned for a constant boundary, so it is pinned to k_el = 0.
 - The ablation baseline (`experiment_2`) and any existing checkpoint must be
   retrained, or loaded with `experiment_legacy_5param`.
+
+## H2 evaluation time (72 h → 24 h)
+
+**Change.** H2 (10 nm vs 200 nm penetration-depth difference > 100 µm at
+R = 400 µm, C0 = 10 µM) is now evaluated at
+`evaluation.hypotheses.H2_time_hr`:
+
+| Config | H2 time |
+|---|---|
+| `default_config.yaml` | 24.0 h |
+| `experiment_ntd.yaml` | 24.0 h |
+| `experiment_legacy_5param.yaml` | 72.0 h (original) |
+
+The absolute 1 µM threshold and the > 100 µm target are unchanged. The
+model's simulation-duration input (`t_max_hr`) stays at the 72 h baseline
+scenario; only the time the depths are read at moves.
+
+Where the change shows up:
+- `src/evaluate.py::evaluate_h2_hypothesis` reads the time from the config
+  and returns it as `t_hr`.
+- `scripts/run_evaluation.py` and `scripts/generate_results.py` print the
+  configured time.
+- Table 4.4 already has a 24 h column. It gains an extra column if H2 is set
+  to any time other than 24 h or t_max.
+- A config dict without the key falls back to 72 h.
+
+**Why.** With the decaying boundary at the NTD median clearance
+(k_el = 0.0684 hr⁻¹, t½ ≈ 10 h), the surface concentration at 72 h is
+≈ 0.07 µM, below the 1 µM threshold, so both depths are 0 by construction.
+At 24 h the surface is still ≈ 1.9 µM, so the comparison is defined again.
+
+**Ground truth (FDM, no training).** Default config (N_r = 200), R = 400 µm,
+C0 = 10 µM, k_d = 0.01 hr⁻¹, threshold 1 µM:
+
+| k_el (hr⁻¹) | t | 10 nm depth | 200 nm depth | Difference | H2 (> 100 µm) |
+|---|---|---|---|---|---|
+| 0.0684 | 24 h | 400 µm | 400 µm | 0 µm | **fail** |
+| 0 | 24 h | 400 µm | 400 µm | 0 µm | **fail** |
+| 0.0684 | 72 h | 0 µm | 0 µm | 0 µm | fail |
+| 0 | 72 h | 400 µm | 400 µm | 0 µm | fail |
+
+At 24 h both particle sizes are above 1 µM through the whole 400 µm
+tumour. The 200 nm particle actually keeps a higher centre concentration
+(3.49 vs 2.00 µM) because it also washes out more slowly once the boundary
+decays. The difference is only above 100 µm early in the time course:
+
+| t | 0.5 h | 1 h | 2 h | 3 h | 4 h | ≥ 6 h |
+|---|---|---|---|---|---|---|
+| 10 nm | 400 µm | 400 µm | 400 µm | 400 µm | 400 µm | 400 µm |
+| 200 nm | 62 µm | 92 µm | 150 µm | 204 µm | 274 µm | 400 µm |
+| Difference | 338 µm | 308 µm | 250 µm | 197 µm | 126 µm | 0 µm |
+
+The window where the difference exceeds 100 µm is t ≲ 4.2 h, and it is the
+same for k_el = 0.0684 and k_el = 0. Under the old relative threshold
+(0.1·C0 = 1 µM at C0 = 10 µM) the original 72 h check also gave
+400 vs 400 µm, so H2 has never been passable on ground truth at this
+operating point. A perfect surrogate would therefore report H2 as
+**not supported** at 24 h. To make H2 discriminative, the team needs to
+choose one of:
+- an early time point (≤ 4 h);
+- time-to-reach-depth instead of depth at a fixed time;
+- a larger tumour or a higher threshold.
+
+That is a research-design decision, so it is left open here.
 
 ## Known issue, not fixed: the hard-IC transform caps the surface value
 

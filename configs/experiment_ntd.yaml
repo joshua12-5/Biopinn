@@ -34,6 +34,10 @@ fdm:
 model:
   input_dim: 8
 
+evaluation:
+  hypotheses:
+    H2_time_hr: 24.0               # 72hr surface C is < 1uM at the NTD median k_el
+
 paper:
   baseline:
     k_el_per_hr: 0.0684            # NTD median (t1/2 ~10 h)

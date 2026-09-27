@@ -280,7 +280,7 @@ passed as `--experiment NAME`.
 | # | Hypothesis | Target | Checked by |
 |---|---|---|---|
 | H1 | Test-set concentration prediction accuracy | RMSE < 0.05 μM, R² > 0.990 | `run_evaluation.py` |
-| H2 | Smaller nanoparticles penetrate deeper | 10nm vs. 200nm penetration-depth difference > 100 μm @ R=400μm, t=72hr | `run_evaluation.py` |
+| H2 | Smaller nanoparticles penetrate deeper | 10nm vs. 200nm penetration-depth difference > 100 μm (C > 1 μM) @ R=400μm, t=24hr (`evaluation.hypotheses.H2_time_hr`; 72hr in `experiment_legacy_5param`, see [docs/NTD_ADAPTATION.md](docs/NTD_ADAPTATION.md#h2-evaluation-time-72-h--24-h)) | `run_evaluation.py` |
 | H3 | Three-zone heterogeneity matters | steeper concentration gradient + larger sub-therapeutic zone than a homogeneous-diffusion model | `run_optimization.py` |
 | H4 | Zone-dependent viability | rim viability < 20%, core viability > 60% @ t=72hr | `run_evaluation.py` |
 | H5 | Physics constraint improves PDE consistency | PDE residual ≥ 10× lower than an identical unconstrained (`w_phys=0`) baseline, Wilcoxon-significant | `run_ablation.py` |
