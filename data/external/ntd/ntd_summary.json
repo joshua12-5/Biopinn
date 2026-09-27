@@ -1,0 +1,42 @@
+{
+  "source_file": "7c108eb81257315661e6938a87c7f05d6c74d61df522524b049cee6b52d6c685.csv",
+  "rows": 12590,
+  "datasets": 534,
+  "rows_gt100_pctID_excluded": 42,
+  "rows_zero_pctID": 126,
+  "datasets_in_biopinn_scope(IV, spherical, 10-200nm)": 357,
+  "datasets_with_PK_tissue": 343,
+  "datasets_good_PK_fit_in_scope": 152,
+  "k_el_per_hr_p5_p50_p95": [
+    0.013645969352096235,
+    0.06840315050351803,
+    0.380977872181067
+  ],
+  "t_half_h_median": 10.133263971873578,
+  "spearman_dNP_vs_kel": [
+    -0.013373863307959576,
+    0.8701009511745083
+  ],
+  "spearman_dNP_vs_tumor_pctID_24h": [
+    -0.09974512967111111,
+    0.08510096117291874,
+    299
+  ],
+  "tumor_R_equiv_um_quantiles_5_50_95": [
+    2285.390748670416,
+    3027.9937600125445,
+    9985.024815712495
+  ],
+  "tumor_volume_parse_notes": {
+    "cm3": 515,
+    "bare_assumed_cm3": 10,
+    "mm3": 7,
+    "diameter_mm->sphere": 2
+  },
+  "d_NP_basis_counts_in_scope": {
+    "HD": 329,
+    "TEM": 28
+  },
+  "tumor_Cmax_pctID_median_in_scope": 0.98,
+  "tumor_Tmax_h_median_in_scope": 8.0
+}

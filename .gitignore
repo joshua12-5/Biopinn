@@ -21,6 +21,13 @@ data/viability_maps/*
 !data/raw_simulations/.gitkeep
 !data/processed/.gitkeep
 !data/viability_maps/.gitkeep
+data/raw_simulations_ntd_dev/*
+data/processed_ntd_dev/*
+
+# Nano-Tumor Database: raw input and the large per-row output stay local;
+# the small derived tables in data/external/ntd/ are committed.
+data/external/ntd/raw/
+data/external/ntd/ntd_clean.csv
 
 artifacts/*
 !artifacts/.gitkeep

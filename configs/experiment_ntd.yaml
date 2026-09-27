@@ -1,0 +1,57 @@
+# Nano-Tumor Database (NTD) clearance experiment -- fast dev/smoke-test scale.
+#
+# default_config.yaml already samples k_el_per_hr over the NTD-derived range;
+# this override pins those data-derived values explicitly (so they stay put
+# even if the default is later changed) and shrinks everything to laptop scale
+# with its own output paths, so it never overwrites the production dataset or
+# checkpoint. Values come from scripts/adapt_ntd.py -> data/external/ntd/
+# (see docs/NTD_ADAPTATION.md).
+#
+#   python scripts/generate_dataset.py --experiment experiment_ntd --n-jobs 4
+
+experiment_name: "biopinn_ntd_clearance_dev"
+
+dataset:
+  sample_k_el: true
+  n_simulations: 40
+  split:
+    train: 28
+    val: 6
+    test: 6
+  parameter_ranges:
+    k_el_per_hr: [0.0136, 0.381]   # NTD 5th-95th pct (n=152 in-scope datasets)
+  points_per_sim:
+    data: 400
+    collocation: 800
+    bc_surface: 100
+    bc_center: 100
+    ic: 100
+
+fdm:
+  N_r: 50
+  N_t_initial: 100
+
+model:
+  input_dim: 8
+
+paper:
+  baseline:
+    k_el_per_hr: 0.0684            # NTD median (t1/2 ~10 h)
+
+training:
+  max_points_per_chunk: null
+  checkpoint_every: 0
+  adam:
+    iters: 300
+    step_lr_step_size: 100
+  lbfgs:
+    iters: 20
+  convergence:
+    patience_epochs: 20
+
+paths:
+  raw_simulations: "data/raw_simulations_ntd_dev"
+  processed: "data/processed_ntd_dev"
+  model_checkpoint: "artifacts/biopinn_model_ntd_dev.pt"
+  normalization_stats: "artifacts/normalization_stats_ntd_dev.json"
+  training_history: "artifacts/training_history_ntd_dev.json"
