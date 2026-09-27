@@ -166,7 +166,7 @@ def plot_homogeneous_comparison(hetero_result: dict, homo_result: dict, config: 
 
     axes[0].plot(r, C_h[-1, :], "b-", linewidth=2, label="heterogeneous (3-zone)")
     axes[0].plot(r, C_g[-1, :], "r--", linewidth=2, label="homogeneous (mean D_eff)")
-    threshold = 0.1 * config["biology"]["IC50_uM"]
+    threshold = config["biology"].get("subtherapeutic_threshold_uM", 0.1 * config["biology"]["IC50_uM"])
     axes[0].axhline(threshold, color="gray", linestyle=":", label="sub-therapeutic threshold")
     axes[0].set_xlabel("Radial distance (um)")
     axes[0].set_ylabel("Concentration (uM)")

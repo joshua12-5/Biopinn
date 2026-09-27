@@ -1,0 +1,25 @@
+# Legacy setup: the original constant-C0 boundary, 5 sampled parameters,
+# 7-column model input, relative (0.1*C0) penetration threshold and
+# final-time under-dose zone -- i.e. BIOPINN exactly as it was before the
+# Nano-Tumor Database clearance adaptation (docs/NTD_ADAPTATION.md).
+#
+# Use it to load/evaluate a checkpoint trained before that change, or to
+# reproduce the old results:
+#   python scripts/run_evaluation.py --experiment experiment_legacy_5param
+# (Inference code also derives the parameter columns from the checkpoint's
+# normalization_stats.json, but model.input_dim must match the checkpoint.)
+
+experiment_name: "biopinn_legacy_5param"
+
+dataset:
+  sample_k_el: false
+
+model:
+  input_dim: 7
+
+biology:
+  subtherapeutic_basis: "final"
+
+evaluation:
+  penetration_threshold:
+    mode: "relative"

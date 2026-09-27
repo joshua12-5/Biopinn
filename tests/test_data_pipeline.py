@@ -40,7 +40,7 @@ FAST_CONFIG["dataset"]["points_per_sim"] = {
 
 def test_latin_hypercube_sample_shape_and_bounds():
     sample = latin_hypercube_sample(50, FAST_CONFIG, seed=0)
-    assert sample.shape == (50, 5)
+    assert sample.shape == (50, len(PARAM_ORDER))  # 6: k_el_per_hr is sampled by default
     ranges = FAST_CONFIG["dataset"]["parameter_ranges"]
     for i, p in enumerate(PARAM_ORDER):
         lo, hi = ranges[p]
@@ -91,9 +91,12 @@ def test_sample_training_points_counts_and_bounds():
     assert len(pts["bc_center"]["r"]) == pcfg["bc_center"]
     assert len(pts["ic"]["r"]) == pcfg["ic"]
 
-    # bc_surface sits exactly on the tumor surface with the surface concentration.
+    # bc_surface sits exactly on the tumor surface with the (decaying) surface
+    # concentration C0*exp(-k_el*t), matching src/fdm_solver.py's boundary.
     assert np.all(pts["bc_surface"]["r"] == sim["R_um"])
-    assert np.all(pts["bc_surface"]["C"] == sim["C0_uM"])
+    np.testing.assert_allclose(
+        pts["bc_surface"]["C"], sim["C0_uM"] * np.exp(-sim["k_el_per_hr"] * pts["bc_surface"]["t"])
+    )
 
     # bc_center sits exactly at the innermost grid point (Neumann location).
     assert np.all(pts["bc_center"]["r"] == sim["r"][0])
@@ -124,7 +127,7 @@ def test_build_split_tensors_columns_and_normalization_ranges():
     tensors = build_split_tensors(sims, stats, FAST_CONFIG, rng=rng)
 
     n_expected = 3 * FAST_CONFIG["dataset"]["points_per_sim"]["data"]
-    assert tensors["data_X"].shape == (n_expected, 7)
+    assert tensors["data_X"].shape == (n_expected, FAST_CONFIG["model"]["input_dim"])  # 8 with k_el
     assert tensors["data_y"].shape == (n_expected, 1)
 
     # r_norm and t_norm columns must lie in [0, 1] for every category.
@@ -135,8 +138,12 @@ def test_build_split_tensors_columns_and_normalization_ranges():
         # Parameter-conditioning columns are also normalized to [0, 1].
         assert np.all(X[:, 2:] >= -1e-6) and np.all(X[:, 2:] <= 1.0 + 1e-6)
 
-    # Hard-IC sanity: bc_surface targets are always C_norm=1, ic targets are always 0.
-    assert tensors["bc_surface_y"] == pytest.approx(1.0)
+    # bc_surface targets are C_norm = exp(-k_el * t) (the decaying Dirichlet
+    # boundary divided by C0); ic targets are always 0.
+    Xb = tensors["bc_surface_X"]
+    t_max = Xb[:, 6] * (stats["t_max_hr"]["max"] - stats["t_max_hr"]["min"]) + stats["t_max_hr"]["min"]
+    k_el = Xb[:, 7] * (stats["k_el_per_hr"]["max"] - stats["k_el_per_hr"]["min"]) + stats["k_el_per_hr"]["min"]
+    np.testing.assert_allclose(tensors["bc_surface_y"].ravel(), np.exp(-k_el * Xb[:, 1] * t_max), rtol=1e-4)
     assert tensors["ic_y"] == pytest.approx(0.0)
 
     # bc_surface/bc_center sit exactly at r_norm=1 / r_norm=0 respectively.
@@ -180,7 +187,7 @@ def test_build_dataset_end_to_end_small(tmp_path):
 
         loaded = np.load(processed_dir / "train.npz")
         assert "data_X" in loaded
-        assert loaded["data_X"].shape[1] == 7
+        assert loaded["data_X"].shape[1] == 2 + len(PARAM_ORDER)
 
         sim_params_path = processed_dir / "sim_params.json"
         assert sim_params_path.exists()

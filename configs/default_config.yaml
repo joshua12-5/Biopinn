@@ -48,7 +48,7 @@ fdm:
   r_min_um: 0.001           # um, avoid singularity at r=0
 
 # ---------------------------------------------------------------------------
-# Synthetic dataset (LHS over 5D parameter space)
+# Synthetic dataset (LHS over 6D parameter space)
 # ---------------------------------------------------------------------------
 dataset:
   # n_simulations scaled back down from 10,000 -- full-batch training (see
@@ -61,6 +61,12 @@ dataset:
   # 24h cap, so also trim training.adam.iters/training.lbfgs.iters if it's
   # still running long.
   n_simulations: 2000
+  # Sample k_el_per_hr (plasma/blood elimination rate) as a 6th LHS
+  # parameter. The FDM surface boundary then decays as C(R,t) = C0*exp(-k_el*t)
+  # (src/fdm_solver.py) and the model gets an 8th input column. Set false
+  # (see configs/experiment_legacy_5param.yaml) for the original constant-C0,
+  # 5-parameter / 7-input setup, e.g. to load a checkpoint trained before this.
+  sample_k_el: true
   split:
     train: 1400
     val: 300
@@ -71,6 +77,11 @@ dataset:
     C0_uM: [0.1, 20]           # initial/surface drug concentration, uM
     k_d_per_hr: [0.005, 0.05]  # drug decay rate, 1/hr
     t_max_hr: [24, 72]         # simulation duration, hr
+    # Nano-Tumor Database (Chen et al. 2023, ACS Nano) blood/plasma
+    # mono-exponential fits over 0-72 h, IV / spherical / 10-200 nm, R^2 >= 0.8:
+    # 5th-95th percentile of 152 datasets (median 0.0684/hr, t1/2 ~10 h).
+    # Derived by scripts/adapt_ntd.py -> data/external/ntd/; see docs/NTD_ADAPTATION.md.
+    k_el_per_hr: [0.0136, 0.381]
   # Deliberately NOT reverted to the old 2000-sim-era values (3000/7500/500/
   # 500/500) -- keeping points_per_sim at this reduced level is what actually
   # cuts total training-batch size (and therefore full-batch training time)
@@ -93,6 +104,16 @@ biology:
   k_p_per_hr: 0.05            # logistic growth rate, range 0.03-0.1
   N_max: 1.0
   penetration_cytotoxicity_threshold: 0.5
+  # Under-dose ("sub-therapeutic" / resistance-risk) zone: radii whose
+  # concentration stays below this absolute value (uM). 0.1 uM = 0.1*IC50,
+  # the value the code has always used (it was already absolute).
+  subtherapeutic_threshold_uM: 0.1
+  # Which concentration is compared against it: "peak" = max over the
+  # treatment window ("never reached"), "final" = at t_max (legacy). With a
+  # constant boundary the two are identical (C rises monotonically); with a
+  # decaying boundary (k_el > 0) "final" would call almost the whole tumor
+  # under-dosed simply because the drug has since cleared.
+  subtherapeutic_basis: "peak"
   h4_time_hr: 72.0
   h4_rim_viability_max: 20.0   # percent
   h4_core_viability_min: 60.0  # percent
@@ -102,12 +123,13 @@ biology:
 # ---------------------------------------------------------------------------
 model:
   # Parametric surrogate: (r_norm, t_norm, R_norm, d_NP_norm, C0_norm,
-  # k_d_norm, t_max_norm), matching src/data_pipeline.py's 7-column point
-  # tensor layout (see PARAM_ORDER there). This extends the base "(r_norm,
+  # k_d_norm, t_max_norm, k_el_norm), matching src/data_pipeline.py's
+  # 8-column point tensor layout (see PARAM_ORDER / param_order there; 7 if
+  # dataset.sample_k_el is false). This extends the base "(r_norm,
   # t_norm) dim 2" skeleton so one trained model generalizes across the 5D
   # parameter space -- required for Phase 10's optimization surrogate to
   # query arbitrary (d_NP, C0, R) combinations without retraining.
-  input_dim: 7
+  input_dim: 8
   output_dim: 1               # C_norm
   n_layers: 5
   n_neurons: 96
@@ -254,6 +276,16 @@ optimization:
 # Evaluation thresholds (publication-quality acceptance criteria)
 # ---------------------------------------------------------------------------
 evaluation:
+  # Concentration-based penetration depth (src/evaluate.py,
+  # src/results.py): the drug front is where C first exceeds the threshold.
+  #   mode "absolute": C > absolute_uM (default; 1 uM = IC50). Needed once
+  #     the surface concentration decays (k_el > 0).
+  #   mode "relative": C > relative_fraction * C0 (legacy behavior; the
+  #     paper assets use paper.penetration_threshold_fraction in this mode).
+  penetration_threshold:
+    mode: "absolute"
+    absolute_uM: 1.0
+    relative_fraction: 0.1
   thresholds:
     rmse_uM: 0.10
     mae_uM: 0.05
@@ -280,11 +312,12 @@ paper:
     C0_uM: 10.0
     k_d_per_hr: 0.01
     t_max_hr: 72.0
+    k_el_per_hr: 0.0684   # Nano-Tumor Database median (see dataset.parameter_ranges.k_el_per_hr)
   sweeps:
     d_NP_nm: [10, 50, 100, 150, 200]
     time_points_hr: [0, 6, 12, 24, 48, 72]
     radii_um: [200, 300, 400, 500]
-  penetration_threshold_fraction: 0.1   # C >= this fraction of C0 counts as "penetrated" (matches src/evaluate.py)
+  penetration_threshold_fraction: 0.1   # used only when evaluation.penetration_threshold.mode == "relative"
   hypotheses:
     H3_subtherapeutic_zone_increase_pct: 15.0   # heterogeneous sub-therapeutic zone must be >= this much larger
     H6_max_pinn_time_s: 5.0                     # per-configuration surrogate wall-clock cap

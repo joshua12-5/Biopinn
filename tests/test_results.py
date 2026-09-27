@@ -49,6 +49,7 @@ NORM_STATS = {
     "C0_uM": {"min": 0.1, "max": 20.0},
     "k_d_per_hr": {"min": 0.005, "max": 0.05},
     "t_max_hr": {"min": 24.0, "max": 72.0},
+    "k_el_per_hr": {"min": 0.0136, "max": 0.381},
 }
 
 
@@ -72,7 +73,7 @@ def sims():
 @pytest.fixture(scope="module")
 def collocation_X():
     rng = np.random.default_rng(0)
-    return torch.tensor(rng.uniform(0.0, 1.0, size=(200, 7)), dtype=torch.float32)
+    return torch.tensor(rng.uniform(0.0, 1.0, size=(200, FAST_CONFIG["model"]["input_dim"])), dtype=torch.float32)
 
 
 @pytest.fixture(scope="module")

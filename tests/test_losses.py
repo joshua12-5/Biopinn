@@ -84,11 +84,13 @@ def test_dirichlet_and_ic_losses_are_zero_for_a_perfect_model():
     # instead check the *targets* used are physically correct: C_norm=1 at
     # the surface, C_norm=0 at t=0 -- and that the loss functions correctly
     # measure a real model's deviation from them (nonzero, finite).
+    # With k_el enabled the surface target decays: C_norm(R,t) = exp(-k_el*t),
+    # which is 1 at t=0 and stays in (0, 1].
     result = _dataset()
     model = BIOPINN(FAST_CONFIG)
     batch = _batch_as_tensors(result["splits"]["train"])
 
-    assert torch.all(batch["bc_surface_y"] == 1.0)
+    assert torch.all(batch["bc_surface_y"] > 0.0) and torch.all(batch["bc_surface_y"] <= 1.0)
     assert torch.all(batch["ic_y"] == 0.0)
 
     L_bc = dirichlet_bc_loss(model, batch["bc_surface_X"], batch["bc_surface_y"])

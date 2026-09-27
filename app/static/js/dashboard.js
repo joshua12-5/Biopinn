@@ -56,14 +56,17 @@
     for (const key of Object.keys(params)) {
       const p = params[key];
       const input = $(`in-${key}`);
+      if (!input) continue; // parameter this page has no control for
+      const wrapper = $(`control-${key}`);
+      if (wrapper) wrapper.hidden = false; // optional controls (e.g. k_el) start hidden
       const step = (p.max - p.min) / 200;
       input.min = p.min;
       input.max = p.max;
       input.step = step > 0 ? step : 1;
       input.value = p.default;
-      $(`val-${key}`).textContent = fmt(p.default, key === "k_d_per_hr" ? 4 : 1);
+      $(`val-${key}`).textContent = fmt(p.default, key === "k_d_per_hr" || key === "k_el_per_hr" ? 4 : 1);
       input.addEventListener("input", () => {
-        $(`val-${key}`).textContent = fmt(Number(input.value), key === "k_d_per_hr" ? 4 : 1);
+        $(`val-${key}`).textContent = fmt(Number(input.value), key === "k_d_per_hr" || key === "k_el_per_hr" ? 4 : 1);
         scheduleRunPredict();
       });
     }
@@ -77,13 +80,16 @@
   }
 
   function currentParams() {
-    return {
+    const out = {
       R_um: Number($("in-R_um").value),
       d_NP_nm: Number($("in-d_NP_nm").value),
       C0_uM: Number($("in-C0_uM").value),
       k_d_per_hr: Number($("in-k_d_per_hr").value),
       t_max_hr: Number($("in-t_max_hr").value),
     };
+    // k_el is only offered when the loaded model was trained with it.
+    if (meta.parameters.k_el_per_hr) out.k_el_per_hr = Number($("in-k_el_per_hr").value);
+    return out;
   }
 
   function scheduleRunPredict() {

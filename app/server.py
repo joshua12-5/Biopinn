@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from src.ablation import compare_residuals, wilcoxon_test
 from src.biology import compute_biological_response
 from src.config import load_config, resolve_path
+from src.data_pipeline import default_k_el
 from src.evaluate import full_evaluation_report, resolve_test_simulations
 from src.microenvironment import assign_zones, oxygen_gradient, radial_grid
 from src.model import load_checkpoint
@@ -60,6 +61,8 @@ class ParamsIn(BaseModel):
     C0_uM: float = Field(..., gt=0)
     k_d_per_hr: float = Field(..., ge=0)
     t_max_hr: float = Field(..., gt=0)
+    # Optional: omitted -> paper baseline (or 0 for a model trained without k_el).
+    k_el_per_hr: float | None = Field(None, ge=0)
 
 
 class State:
@@ -263,6 +266,14 @@ def get_meta() -> JSONResponse:
                 "C0_uM": {"min": ranges["C0_uM"][0], "max": ranges["C0_uM"][1], "default": midpoint("C0_uM"), "unit": "μM", "label": "Surface concentration"},
                 "k_d_per_hr": {"min": ranges["k_d_per_hr"][0], "max": ranges["k_d_per_hr"][1], "default": midpoint("k_d_per_hr"), "unit": "hr⁻¹", "label": "Decay rate"},
                 "t_max_hr": {"min": ranges["t_max_hr"][0], "max": ranges["t_max_hr"][1], "default": midpoint("t_max_hr"), "unit": "hr", "label": "Simulation duration"},
+                # k_el control only when the loaded model is conditioned on it
+                # (its normalization stats carry the key).
+                **(
+                    {"k_el_per_hr": {"min": ranges["k_el_per_hr"][0], "max": ranges["k_el_per_hr"][1],
+                                     "default": default_k_el(state.config), "unit": "hr⁻¹", "label": "Plasma clearance k_el"}}
+                    if "k_el_per_hr" in (state.norm_stats or {}) and "k_el_per_hr" in ranges
+                    else {}
+                ),
             },
             "thresholds": state.config["evaluation"]["thresholds"],
             "zones": state.config["microenvironment"]["zones"],
@@ -279,6 +290,8 @@ def predict(params: ParamsIn) -> JSONResponse:
 
     config, norm_stats = state.config, state.norm_stats
     sim_params = params.model_dump()
+    if sim_params.get("k_el_per_hr") is None:
+        sim_params["k_el_per_hr"] = default_k_el(config)
 
     r = radial_grid(sim_params["R_um"], UI_N_R, config["fdm"]["r_min_um"])
     t = np.linspace(0.0, sim_params["t_max_hr"], UI_N_T)
@@ -291,10 +304,12 @@ def predict(params: ParamsIn) -> JSONResponse:
     eta = kill_fraction(
         state.model, sim_params["R_um"], sim_params["d_NP_nm"], sim_params["C0_uM"],
         config, norm_stats, sim_params["k_d_per_hr"], sim_params["t_max_hr"],
+        k_el_per_hr=sim_params["k_el_per_hr"],
     )
     resistance = _resistance_map(
         state.model, sim_params["R_um"], sim_params["d_NP_nm"], sim_params["C0_uM"],
         config, norm_stats, sim_params["k_d_per_hr"], sim_params["t_max_hr"],
+        k_el_per_hr=sim_params["k_el_per_hr"],
     )
 
     return JSONResponse(

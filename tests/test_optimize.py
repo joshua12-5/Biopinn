@@ -36,6 +36,7 @@ NORM_STATS = {
     "C0_uM": {"min": 0.1, "max": 20.0},
     "k_d_per_hr": {"min": 0.005, "max": 0.05},
     "t_max_hr": {"min": 24.0, "max": 72.0},
+    "k_el_per_hr": {"min": 0.0136, "max": 0.381},
 }
 
 
@@ -144,8 +145,11 @@ def test_h3_holds_for_a_well_chosen_case():
     # (The guide's own example parameters, e.g. C0=10uM, oversaturate the
     # whole tumor for both models, leaving nothing to compare -- see
     # tests/test_biology.py's H4 investigation for the same phenomenon.)
+    # This regime was found for the constant-C0 boundary, so k_el is pinned
+    # to 0 here (with the default NTD baseline k_el the 0.105uM surface dose
+    # clears well before 72hr and there's no contrast left to compare).
     result = homogeneous_vs_heterogeneous(
-        CONFIG, d_NP_nm=200.0, R_um=500.0, C0_uM=0.105, k_d_per_hr=0.05, t_max_hr=72.0
+        CONFIG, d_NP_nm=200.0, R_um=500.0, C0_uM=0.105, k_d_per_hr=0.05, t_max_hr=72.0, k_el_per_hr=0.0
     )
     h, g = result["heterogeneous"], result["homogeneous"]
     assert h["avg_concentration_gradient_uM_per_um"] > g["avg_concentration_gradient_uM_per_um"]

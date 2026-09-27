@@ -6,9 +6,9 @@ initial condition), combined with the configured weights (w_data, w_phys,
 w_bc, w_neu, w_ic). The point tensor layout (see src/data_pipeline.py and
 src/model.py) is:
 
-    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm]
+    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm(, k_el_norm)]
 
-`physics_loss`/`pde_residual` denormalize the trailing five columns back to
+`physics_loss`/`pde_residual` denormalize the trailing parameter columns back to
 physical units (using normalization_stats.json) to evaluate the governing
 PDE with the correct per-point D_eff(r) and k_d(r) from
 src/microenvironment.py, then convert the network's normalized derivatives
@@ -27,21 +27,23 @@ from __future__ import annotations
 
 import torch
 
-from src.data_pipeline import PARAM_ORDER
+from src.data_pipeline import param_order
 from src.microenvironment import decay_rate_field, effective_diffusivity
 from src.model import BIOPINN
 
 R_COLUMN, T_COLUMN = 0, 1
-PARAM_COLUMNS_START = 2  # R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm
+PARAM_COLUMNS_START = 2  # R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm(, k_el_norm)
 
 
 def _denormalize_params(param_cols: torch.Tensor, norm_stats: dict) -> dict[str, torch.Tensor]:
-    """Denormalize the five trailing parameter columns back to physical units.
+    """Denormalize the trailing parameter columns back to physical units.
 
-    Returns a dict keyed by src.data_pipeline.PARAM_ORDER, each an [N,1] tensor.
+    Returns a dict keyed by src.data_pipeline.param_order(norm_stats=...),
+    each an [N,1] tensor. (k_el_per_hr, when present, only enters through the
+    Dirichlet BC target -- the interior PDE residual doesn't depend on it.)
     """
     physical = {}
-    for i, key in enumerate(PARAM_ORDER):
+    for i, key in enumerate(param_order(norm_stats=norm_stats)):
         lo, hi = norm_stats[key]["min"], norm_stats[key]["max"]
         physical[key] = param_cols[:, i : i + 1] * (hi - lo) + lo
     return physical

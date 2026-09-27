@@ -49,9 +49,11 @@ import torch
 from src.ablation import compare_residuals, wilcoxon_test
 from src.biology import cytotoxicity_map, predict_concentration_field, viability_map
 from src.config import resolve_path
+from src.data_pipeline import default_k_el
 from src.evaluate import (
     compute_metrics,
     compute_pde_residual_stats,
+    concentration_threshold_uM,
     evaluate_test_set,
     penetration_depth_from_concentration,
 )
@@ -75,8 +77,18 @@ ZONE_COLORS = {"proliferating_rim": "#c9623f", "quiescent_zone": "#d9a441", "nec
 
 
 def baseline_params(config: dict) -> dict:
-    """The manuscript's fixed baseline parameter set (R, d_NP, C0, k_d, t_max)."""
-    return dict(config["paper"]["baseline"])
+    """The manuscript's fixed baseline parameter set (R, d_NP, C0, k_d, t_max,
+    k_el). k_el_per_hr is the configured baseline when k_el is enabled
+    (dataset.sample_k_el), else 0 (constant-C0 boundary, legacy behavior)."""
+    params = dict(config["paper"]["baseline"])
+    params["k_el_per_hr"] = default_k_el(config)
+    return params
+
+
+def _pen_threshold_uM(config: dict, C0_uM: float) -> float:
+    """Penetration threshold for the paper assets: config-driven absolute uM,
+    or (legacy relative mode) paper.penetration_threshold_fraction * C0."""
+    return concentration_threshold_uM(config, C0_uM, relative_fraction=config["paper"]["penetration_threshold_fraction"])
 
 
 def load_training_history(config: dict) -> dict:
@@ -110,7 +122,7 @@ def solve_diameter_sweep(config: dict, params: dict | None = None) -> dict[float
     so each diameter is only solved once."""
     p = {**baseline_params(config), **(params or {})}
     return {
-        d_NP: solve_fdm(p["R_um"], d_NP, p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config)
+        d_NP: solve_fdm(p["R_um"], d_NP, p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, k_el_per_hr=p.get("k_el_per_hr", 0.0))
         for d_NP in config["paper"]["sweeps"]["d_NP_nm"]
     }
 
@@ -122,7 +134,8 @@ def _baseline_fdm_from_sweep(sweep: dict[float, dict], params: dict, config: dic
     without also including paper.baseline.d_NP_nm)."""
     if params["d_NP_nm"] in sweep:
         return sweep[params["d_NP_nm"]]
-    return solve_fdm(params["R_um"], params["d_NP_nm"], params["C0_uM"], params["k_d_per_hr"], params["t_max_hr"], config)
+    return solve_fdm(params["R_um"], params["d_NP_nm"], params["C0_uM"], params["k_d_per_hr"], params["t_max_hr"], config,
+                     k_el_per_hr=params.get("k_el_per_hr", 0.0))
 
 
 def solve_hetero_and_homogeneous(config: dict, params: dict | None = None) -> dict:
@@ -131,13 +144,15 @@ def solve_hetero_and_homogeneous(config: dict, params: dict | None = None) -> di
     with a spatially homogeneous D_eff equal to the arithmetic mean of the three
     zone factors. Shared by Fig 4.9 and Table 4.6 so the physics is solved once."""
     p = {**baseline_params(config), **(params or {})}
-    hetero = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config)
+    k_el = p.get("k_el_per_hr", 0.0)
+    hetero = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, k_el_per_hr=k_el)
 
     const = config["constants"]
     D_free_m2_s = stokes_einstein_diffusivity(p["d_NP_nm"], const["T"], const["eta"], const["k_B"])
     D_free_um2_hr = D_free_m2_s * 1e12 * 3600.0
     D_eff_homogeneous = D_free_um2_hr * float(np.mean(list(config["microenvironment"]["f_zone"].values())))
-    homog = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, D_eff_override=D_eff_homogeneous)
+    homog = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, D_eff_override=D_eff_homogeneous,
+                      k_el_per_hr=k_el)
 
     return {"params": p, "hetero": hetero, "homog": homog, "D_eff_homogeneous_um2_per_hr": D_eff_homogeneous}
 
@@ -304,7 +319,6 @@ def fig_4_6_penetration_vs_time(model, config: dict, norm_stats: dict, n_r: int 
     """Fig 4.6 -- Drug Penetration Depth vs. Time for Five Nanoparticle Diameters."""
     params = baseline_params(config)
     diameters = config["paper"]["sweeps"]["d_NP_nm"]
-    threshold_fraction = config["paper"]["penetration_threshold_fraction"]
     r = radial_grid(params["R_um"], n_r, config["fdm"]["r_min_um"])
     t = np.linspace(0.0, params["t_max_hr"], n_t)
 
@@ -314,7 +328,7 @@ def fig_4_6_penetration_vs_time(model, config: dict, norm_stats: dict, n_r: int 
     for i, d_NP in enumerate(diameters):
         sim_params = {**params, "d_NP_nm": d_NP}
         C = predict_concentration_field(model, r, t, sim_params, norm_stats)
-        depth = penetration_depth_from_concentration(C, r, params["C0_uM"], threshold_fraction)
+        depth = penetration_depth_from_concentration(C, r, params["C0_uM"], threshold_uM=_pen_threshold_uM(config, params["C0_uM"]))
         ax.plot(t, depth, color=colors[i], linewidth=2, label=f"d_NP = {d_NP:g} nm")
         final_depths[d_NP] = float(depth[-1])
 
@@ -500,7 +514,7 @@ def table_4_1_fdm_summary(config: dict, diameter_sweep: dict | None = None) -> t
     dr = float(r[1] - r[0])
     cfl_number = float(D_eff.max() * dt_internal / dr**2)  # same ratio src/fdm_solver.py::check_cfl guards against
 
-    depth_curve = penetration_depth_from_concentration(C, r, params["C0_uM"], config["paper"]["penetration_threshold_fraction"])
+    depth_curve = penetration_depth_from_concentration(C, r, params["C0_uM"], threshold_uM=_pen_threshold_uM(config, params["C0_uM"]))
     rows = []
     for hours in config["paper"]["sweeps"]["time_points_hr"]:
         idx = int(np.argmin(np.abs(t - hours)))
@@ -529,7 +543,7 @@ def table_4_2_penetration_vs_diameter(config: dict, diameter_sweep: dict | None 
         r, t, C = fdm["r"], fdm["t"], fdm["C"]
         D_free_um2_hr = stokes_einstein_diffusivity(d_NP, const["T"], const["eta"], const["k_B"]) * 1e12 * 3600.0
         D_eff_rim = D_free_um2_hr * f_rim
-        depth_final = penetration_depth_from_concentration(C, r, params["C0_uM"], config["paper"]["penetration_threshold_fraction"])[-1]
+        depth_final = penetration_depth_from_concentration(C, r, params["C0_uM"], threshold_uM=_pen_threshold_uM(config, params["C0_uM"]))[-1]
         rows.append(
             {
                 "d_NP (nm)": d_NP,
@@ -555,14 +569,13 @@ def table_4_3_pinn_metrics(model, config: dict, norm_stats: dict, sims: list[dic
     test set's collocation batch -- an honest population statistic, noted
     here rather than silently presented as a per-simulation aggregate.
     """
-    threshold_fraction = config["paper"]["penetration_threshold_fraction"]
     per_sim = []
     for sim in sims:
         r, t, C_true = sim["r"], sim["t"], sim["C"]
         C_pred = predict_concentration_field(model, r, t, sim, norm_stats)
         m = compute_metrics(C_pred, C_true, config)
-        pen_pred = penetration_depth_from_concentration(C_pred, r, sim["C0_uM"], threshold_fraction)
-        pen_true = penetration_depth_from_concentration(C_true, r, sim["C0_uM"], threshold_fraction)
+        pen_pred = penetration_depth_from_concentration(C_pred, r, sim["C0_uM"], threshold_uM=_pen_threshold_uM(config, sim["C0_uM"]))
+        pen_true = penetration_depth_from_concentration(C_true, r, sim["C0_uM"], threshold_uM=_pen_threshold_uM(config, sim["C0_uM"]))
         m["penetration_rmse_um"] = float(np.sqrt(np.mean((pen_pred - pen_true) ** 2)))
         per_sim.append(m)
     per_sim_df = pd.DataFrame(per_sim)
@@ -615,7 +628,6 @@ def table_4_4_penetration_analysis(model, config: dict, norm_stats: dict, diamet
     """
     params = baseline_params(config)
     sweep = diameter_sweep or solve_diameter_sweep(config)
-    threshold_fraction = config["paper"]["penetration_threshold_fraction"]
 
     rows = []
     for d_NP, fdm in sorted(sweep.items()):
@@ -623,8 +635,8 @@ def table_4_4_penetration_analysis(model, config: dict, norm_stats: dict, diamet
         sim_params = {**params, "d_NP_nm": d_NP}
         C_pred = predict_concentration_field(model, r, t, sim_params, norm_stats)
 
-        pen_pred = penetration_depth_from_concentration(C_pred, r, params["C0_uM"], threshold_fraction)
-        pen_true = penetration_depth_from_concentration(C_true, r, params["C0_uM"], threshold_fraction)
+        pen_pred = penetration_depth_from_concentration(C_pred, r, params["C0_uM"], threshold_uM=_pen_threshold_uM(config, params["C0_uM"]))
+        pen_true = penetration_depth_from_concentration(C_true, r, params["C0_uM"], threshold_uM=_pen_threshold_uM(config, params["C0_uM"]))
         rmse = float(np.sqrt(np.mean((pen_pred - pen_true) ** 2)))
 
         idx_24 = int(np.argmin(np.abs(t - 24.0)))
@@ -652,8 +664,10 @@ def table_4_5_viability_summary(model, config: dict, norm_stats: dict, n_r: int 
     rows = []
     for d_NP in config["paper"]["sweeps"]["d_NP_nm"]:
         sim_params = {**params, "d_NP_nm": d_NP}
-        eta = kill_fraction(model, params["R_um"], d_NP, params["C0_uM"], config, norm_stats, params["k_d_per_hr"], params["t_max_hr"])
-        resistance = _resistance_map(model, params["R_um"], d_NP, params["C0_uM"], config, norm_stats, params["k_d_per_hr"], params["t_max_hr"])
+        eta = kill_fraction(model, params["R_um"], d_NP, params["C0_uM"], config, norm_stats, params["k_d_per_hr"], params["t_max_hr"],
+                            k_el_per_hr=params["k_el_per_hr"])
+        resistance = _resistance_map(model, params["R_um"], d_NP, params["C0_uM"], config, norm_stats, params["k_d_per_hr"], params["t_max_hr"],
+                                     k_el_per_hr=params["k_el_per_hr"])
 
         t = np.linspace(0.0, params["t_max_hr"], n_t)
         C = predict_concentration_field(model, r, t, sim_params, norm_stats)

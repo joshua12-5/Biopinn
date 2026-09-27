@@ -58,7 +58,10 @@ import torch
 # where the heterogeneous-vs-homogeneous diffusion contrast is genuinely
 # visible (the guide's suggested "typical" demo parameters, e.g. C0=10uM,
 # saturate the whole tumor for both models within 72hr).
-H3_DEMO_PARAMS = {"d_NP_nm": 200.0, "R_um": 500.0, "C0_uM": 0.105, "k_d_per_hr": 0.05, "t_max_hr": 72.0}
+# k_el_per_hr is pinned to 0 (constant-C0 boundary) because this demo regime
+# was tuned for the constant boundary; it's a pure-FDM physics illustration,
+# not a query of the (possibly k_el-conditioned) PINN.
+H3_DEMO_PARAMS = {"d_NP_nm": 200.0, "R_um": 500.0, "C0_uM": 0.105, "k_d_per_hr": 0.05, "t_max_hr": 72.0, "k_el_per_hr": 0.0}
 
 
 def _load_normalization_stats(config: dict) -> dict:
@@ -87,7 +90,7 @@ def make_representative_sim_figures(model, config: dict, norm_stats: dict, outpu
     animate_concentration(response["C"], r, t, config, save_path=str(output_dir / "concentration_animation.gif"))
 
     print(f"  sim {sim_params['sim_id']} (R={sim_params['R_um']:.0f}um, d_NP={sim_params['d_NP_nm']:.0f}nm, "
-          f"C0={sim_params['C0_uM']:.2f}uM): concentration_heatmap.png, penetration_depth.png, "
+          f"C0={sim_params['C0_uM']:.2f}uM, k_el={sim_params.get('k_el_per_hr', 0.0):.4f}/hr): concentration_heatmap.png, penetration_depth.png, "
           "viability_map.png, cytotoxicity_map.png, concentration_animation.gif")
     return sim_params
 
@@ -106,14 +109,16 @@ def make_effectiveness_surface_figure(model, config: dict, norm_stats: dict, out
 
 def make_h3_figure(config: dict, output_dir: Path) -> None:
     p = H3_DEMO_PARAMS
-    hetero_result = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config)
+    k_el = p.get("k_el_per_hr", 0.0)
+    hetero_result = solve_fdm(p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, k_el_per_hr=k_el)
 
     const = config["constants"]
     D_free_m2_s = stokes_einstein_diffusivity(p["d_NP_nm"], const["T"], const["eta"], const["k_B"])
     D_free_um2_hr = D_free_m2_s * 1e12 * 3600.0
     D_eff_homogeneous = D_free_um2_hr * float(np.mean(list(config["microenvironment"]["f_zone"].values())))
     homog_result = solve_fdm(
-        p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, D_eff_override=D_eff_homogeneous
+        p["R_um"], p["d_NP_nm"], p["C0_uM"], p["k_d_per_hr"], p["t_max_hr"], config, D_eff_override=D_eff_homogeneous,
+        k_el_per_hr=k_el,
     )
 
     plot_homogeneous_comparison(hetero_result, homog_result, config, save_path=str(output_dir / "h3_homogeneous_comparison.png"))

@@ -8,9 +8,20 @@ in paths.processed are the handoff into the local pipeline.
 
 Point tensor layout
 --------------------
-Every sampled point is stored as a 7-column feature row:
+Every sampled point is stored as an 8-column feature row (default):
 
-    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm]
+    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm, k_el_norm]
+
+`k_el_per_hr` (plasma/blood elimination rate, 1/hr) is the 6th sampled
+parameter when `dataset.sample_k_el` is true (the default). It drives the
+time-varying Dirichlet boundary C(R,t) = C0 * exp(-k_el * t) already
+implemented in src/fdm_solver.py; its range comes from the Nano-Tumor
+Database blood/plasma fits (see scripts/adapt_ntd.py, docs/NTD_ADAPTATION.md).
+With `dataset.sample_k_el: false` (configs/experiment_legacy_5param.yaml) the
+layout is the original 7-column one and k_el is fixed at 0 (constant BC).
+Downstream inference code derives the column order from the keys present in
+normalization_stats.json (see param_order), so checkpoints trained with the
+old 5-parameter layout keep working.
 
 `r_norm`/`t_norm` are normalized by *that point's own simulation* (r/R_um,
 t/t_max_hr) as required by the PINN's hard-IC output transform. The
@@ -36,7 +47,58 @@ from scipy.stats import qmc
 from src.config import resolve_path
 from src.fdm_solver import solve_fdm
 
-PARAM_ORDER = ("R_um", "d_NP_nm", "C0_uM", "k_d_per_hr", "t_max_hr")
+BASE_PARAM_ORDER = ("R_um", "d_NP_nm", "C0_uM", "k_d_per_hr", "t_max_hr")
+PARAM_ORDER = BASE_PARAM_ORDER + ("k_el_per_hr",)
+# Value an optional parameter takes when a config/checkpoint doesn't sample it.
+OPTIONAL_PARAM_DEFAULTS = {"k_el_per_hr": 0.0}
+
+
+def k_el_enabled(config: dict) -> bool:
+    """True if k_el_per_hr is a sampled/conditioned parameter under `config`."""
+    ds = config.get("dataset", {})
+    return bool(ds.get("sample_k_el", False)) and "k_el_per_hr" in ds.get("parameter_ranges", {})
+
+
+def param_order(config: dict | None = None, norm_stats: dict | None = None) -> tuple[str, ...]:
+    """Parameter-column order for the point tensors.
+
+    If `norm_stats` is given, the order is derived from which parameters it
+    contains (so a checkpoint + its normalization_stats.json always agree,
+    whatever the current config says). Otherwise it follows `config`.
+    """
+    if norm_stats is not None:
+        return tuple(p for p in PARAM_ORDER if p in norm_stats)
+    if config is not None and k_el_enabled(config):
+        return PARAM_ORDER
+    return BASE_PARAM_ORDER
+
+
+def default_k_el(config: dict) -> float:
+    """k_el to use when a caller doesn't specify one: the paper baseline's
+    value if k_el is enabled, else 0 (constant-C0 boundary, legacy behavior)."""
+    if not k_el_enabled(config):
+        return 0.0
+    return float(config.get("paper", {}).get("baseline", {}).get("k_el_per_hr", 0.0))
+
+
+def sim_value(sim: dict, key: str) -> float:
+    """sim[key], falling back to OPTIONAL_PARAM_DEFAULTS for optional params."""
+    if key in sim:
+        return sim[key]
+    return OPTIONAL_PARAM_DEFAULTS[key]
+
+
+def check_input_dim(config: dict, order: tuple[str, ...] | None = None) -> None:
+    """Raise a clear error if model.input_dim doesn't match 2 + #params."""
+    order = order if order is not None else param_order(config)
+    expected = 2 + len(order)
+    got = config["model"]["input_dim"]
+    if got != expected:
+        raise ValueError(
+            f"model.input_dim={got} but the point tensors have {expected} columns "
+            f"(r_norm, t_norm, {', '.join(order)}). Set model.input_dim: {expected} "
+            "or toggle dataset.sample_k_el."
+        )
 
 
 def _normalize(value: float, lo: float, hi: float) -> float:
@@ -48,13 +110,15 @@ def _normalize(value: float, lo: float, hi: float) -> float:
 def latin_hypercube_sample(n_samples: int, config: dict, seed: int | None) -> np.ndarray:
     """Sample n_samples points over the 5D parameter space via LHS.
 
-    Returns an array of shape [n_samples, 5]: (R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr).
+    Returns an array of shape [n_samples, len(param_order(config))]:
+    (R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr[, k_el_per_hr]).
     """
     ranges = config["dataset"]["parameter_ranges"]
-    l_bounds = [ranges[p][0] for p in PARAM_ORDER]
-    u_bounds = [ranges[p][1] for p in PARAM_ORDER]
+    order = param_order(config)
+    l_bounds = [ranges[p][0] for p in order]
+    u_bounds = [ranges[p][1] for p in order]
 
-    sampler = qmc.LatinHypercube(d=len(PARAM_ORDER), seed=seed)
+    sampler = qmc.LatinHypercube(d=len(order), seed=seed)
     sample = sampler.random(n=n_samples)
     return qmc.scale(sample, l_bounds, u_bounds)
 
@@ -84,10 +148,15 @@ def generate_dataset(n_simulations: int, config: dict, seed: int | None, n_jobs:
 
 
 def _solve_one(args: tuple[int, np.ndarray, dict]) -> dict:
-    """Module-level (picklable) worker: solve one LHS-sampled parameter row."""
+    """Module-level (picklable) worker: solve one LHS-sampled parameter row.
+
+    `param_row` holds the 5 base parameters, optionally followed by
+    k_el_per_hr (6 values); a 5-value row means k_el = 0 (constant BC).
+    """
     sim_id, param_row, config = args
-    R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr = param_row
-    fdm_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config)
+    R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr = param_row[:5]
+    k_el_per_hr = float(param_row[5]) if len(param_row) > 5 else OPTIONAL_PARAM_DEFAULTS["k_el_per_hr"]
+    fdm_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config, k_el_per_hr=k_el_per_hr)
     return {
         "sim_id": sim_id,
         "R_um": R_um,
@@ -95,6 +164,7 @@ def _solve_one(args: tuple[int, np.ndarray, dict]) -> dict:
         "C0_uM": C0_uM,
         "k_d_per_hr": k_d_per_hr,
         "t_max_hr": t_max_hr,
+        "k_el_per_hr": k_el_per_hr,
         "r": fdm_result["r"],
         "t": fdm_result["t"],
         "C": fdm_result["C"],
@@ -128,10 +198,14 @@ def sample_training_points(sim: dict, config: dict, rng: np.random.Generator | N
     }
 
     n_bc_s = points_cfg["bc_surface"]
+    t_bc = rng.uniform(0.0, t_max_hr, size=n_bc_s)
+    k_el = sim_value(sim, "k_el_per_hr")
     bc_surface = {
         "r": np.full(n_bc_s, R_um),
-        "t": rng.uniform(0.0, t_max_hr, size=n_bc_s),
-        "C": np.full(n_bc_s, C0_uM),
+        "t": t_bc,
+        # Time-varying Dirichlet target, identical to src/fdm_solver.py's
+        # boundary_value(): C0 * exp(-k_el * t) (== C0 when k_el == 0).
+        "C": C0_uM * np.exp(-k_el * t_bc),
     }
 
     n_bc_c = points_cfg["bc_center"]
@@ -159,15 +233,15 @@ def sample_training_points(sim: dict, config: dict, rng: np.random.Generator | N
 def compute_normalization_stats(sims: list[dict], config: dict) -> dict:
     """Compute min/max normalization stats across the training split."""
     stats = {}
-    for p in PARAM_ORDER:
-        values = np.array([sim[p] for sim in sims], dtype=float)
+    for p in param_order(config):
+        values = np.array([sim_value(sim, p) for sim in sims], dtype=float)
         stats[p] = {"min": float(values.min()), "max": float(values.max())}
     return stats
 
 
 def _param_norm_row(sim: dict, stats: dict) -> np.ndarray:
     return np.array(
-        [_normalize(sim[p], stats[p]["min"], stats[p]["max"]) for p in PARAM_ORDER],
+        [_normalize(sim_value(sim, p), stats[p]["min"], stats[p]["max"]) for p in param_order(norm_stats=stats)],
         dtype=np.float32,
     )
 
@@ -243,8 +317,9 @@ def save_processed_dataset(splits: dict, stats: dict, config: dict, sims_by_spli
         json.dump(stats, f, indent=2)
 
     if sims_by_split is not None:
+        keys = ("sim_id",) + param_order(norm_stats=stats)
         sim_params = {
-            split_name: [{k: (float(sim[k]) if k != "sim_id" else int(sim[k])) for k in ("sim_id",) + PARAM_ORDER} for sim in sims]
+            split_name: [{k: (float(sim_value(sim, k)) if k != "sim_id" else int(sim[k])) for k in keys} for sim in sims]
             for split_name, sims in sims_by_split.items()
         }
         with open(processed_dir / "sim_params.json", "w", encoding="utf-8") as f:
@@ -258,6 +333,7 @@ def build_dataset(config: dict, seed: int | None = None, save: bool = True, n_jo
     normalization stats, so callers (and tests) can inspect the result without
     re-reading it from disk. See generate_dataset's docstring for `n_jobs`.
     """
+    check_input_dim(config)
     ds_cfg = config["dataset"]
     split_cfg = ds_cfg["split"]
     n_total = split_cfg["train"] + split_cfg["val"] + split_cfg["test"]

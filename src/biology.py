@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from src.data_pipeline import PARAM_ORDER
+from src.data_pipeline import OPTIONAL_PARAM_DEFAULTS, param_order
 from src.microenvironment import assign_zones, oxygen_gradient
 
 
@@ -87,8 +87,10 @@ def predict_concentration_field(
         model: trained BIOPINN (put in eval mode internally).
         r: radial grid (um), shape [N_r].
         t: time grid (hr), shape [N_t].
-        sim_params: dict with R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr.
-        norm_stats: normalization stats (src.data_pipeline.PARAM_ORDER keys).
+        sim_params: dict with R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr
+            and (optionally) k_el_per_hr -- defaults to 0.0 if absent.
+        norm_stats: normalization stats; its keys decide which parameter
+            columns the model expects (src.data_pipeline.param_order).
 
     Returns:
         C_rt: concentration field (uM), shape [N_t, N_r].
@@ -98,10 +100,10 @@ def predict_concentration_field(
 
     def normalize(key: str) -> float:
         lo, hi = norm_stats[key]["min"], norm_stats[key]["max"]
-        value = sim_params[key]
+        value = sim_params.get(key, OPTIONAL_PARAM_DEFAULTS[key]) if key in OPTIONAL_PARAM_DEFAULTS else sim_params[key]
         return 0.0 if hi <= lo else (value - lo) / (hi - lo)
 
-    param_row = torch.tensor([normalize(k) for k in PARAM_ORDER], dtype=torch.float32)
+    param_row = torch.tensor([normalize(k) for k in param_order(norm_stats=norm_stats)], dtype=torch.float32)
 
     N_r, N_t = len(r), len(t)
     r_norm = torch.as_tensor(np.asarray(r) / R_um, dtype=torch.float32)

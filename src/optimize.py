@@ -16,13 +16,43 @@ import time
 import numpy as np
 
 from src.biology import cytotoxicity_map, penetration_depth, predict_concentration_field
-from src.data_pipeline import latin_hypercube_sample
+from src.data_pipeline import OPTIONAL_PARAM_DEFAULTS, default_k_el, latin_hypercube_sample, param_order
 from src.fdm_solver import solve_fdm
 from src.microenvironment import radial_grid, stokes_einstein_diffusivity
 
 DEFAULT_K_D_PER_HR = 0.01
 DEFAULT_T_MAX_HR = 72.0
-SUBTHERAPEUTIC_THRESHOLD_FACTOR = 0.1  # fraction of IC50, matching the guide's resistance-zone convention
+SUBTHERAPEUTIC_THRESHOLD_FACTOR = 0.1  # fraction of IC50, matching the guide's resistance-zone convention (legacy default)
+
+
+def subtherapeutic_threshold_uM(config: dict) -> float:
+    """Absolute under-dose threshold (uM): biology.subtherapeutic_threshold_uM,
+    defaulting to the original SUBTHERAPEUTIC_THRESHOLD_FACTOR * IC50 (0.1 uM)."""
+    bio = config["biology"]
+    return float(bio.get("subtherapeutic_threshold_uM", SUBTHERAPEUTIC_THRESHOLD_FACTOR * bio["IC50_uM"]))
+
+
+def exposure_profile(C_rt: np.ndarray, config: dict) -> np.ndarray:
+    """Per-radius concentration compared against the under-dose threshold.
+
+    biology.subtherapeutic_basis:
+      "peak" (default): max over time -- "never reached the threshold during
+        treatment". Required once the surface concentration decays (k_el > 0):
+        with a decaying boundary the final-time field goes to ~0 everywhere,
+        which would mislabel the whole tumor as under-dosed. For a constant
+        boundary (k_el = 0) C(r,t) rises monotonically, so peak == final.
+      "final" (legacy): the concentration at t_max.
+    """
+    basis = config["biology"].get("subtherapeutic_basis", "final")
+    if basis == "peak":
+        return C_rt.max(axis=0)
+    if basis == "final":
+        return C_rt[-1, :]
+    raise ValueError(f"biology.subtherapeutic_basis must be 'peak' or 'final', got {basis!r}")
+
+
+def _k_el(config: dict, k_el_per_hr: float | None) -> float:
+    return default_k_el(config) if k_el_per_hr is None else float(k_el_per_hr)
 
 
 def _volume_average(values: np.ndarray, r: np.ndarray) -> float:
@@ -41,17 +71,20 @@ def kill_fraction(
     k_d_per_hr: float = DEFAULT_K_D_PER_HR,
     t_max_hr: float = DEFAULT_T_MAX_HR,
     N_t: int = 100,
+    k_el_per_hr: float | None = None,
 ) -> float:
     """Volume-averaged tumor kill fraction eta at t_max_hr for one parameter
     combination, from the PINN surrogate. Uses N_t>2 time points so the
     survival-fraction hazard integral (src.biology.survival_fraction) is
     actually resolved over [0, t_max_hr] rather than collapsing to zero
-    kill from a single, too-coarse step."""
+    kill from a single, too-coarse step. `k_el_per_hr` defaults to the paper
+    baseline (0 if k_el isn't enabled)."""
     fdm_cfg = config["fdm"]
     r = radial_grid(R_um, fdm_cfg["N_r"], fdm_cfg["r_min_um"])
     t = np.linspace(0.0, t_max_hr, N_t)
 
-    sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr}
+    sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr,
+                  "k_el_per_hr": _k_el(config, k_el_per_hr)}
     C_rt = predict_concentration_field(model, r, t, sim_params, norm_stats)
     cytotox = cytotoxicity_map(C_rt, t, config)
     return _volume_average(cytotox[-1, :], r)
@@ -67,20 +100,22 @@ def _resistance_map(
     k_d_per_hr: float,
     t_max_hr: float,
     N_t: int = 100,
+    k_el_per_hr: float | None = None,
 ) -> dict:
-    """Sub-therapeutic (resistance-risk) zone map at t_max_hr: which radii
-    never reach subtherapeutic_threshold_factor*IC50, and what volume
-    fraction of the tumor that represents."""
+    """Sub-therapeutic (resistance-risk) zone map over [0, t_max_hr]: which
+    radii never reach subtherapeutic_threshold_uM (see exposure_profile for
+    peak-vs-final), and what volume fraction of the tumor that represents."""
     fdm_cfg = config["fdm"]
     r = radial_grid(R_um, fdm_cfg["N_r"], fdm_cfg["r_min_um"])
     t = np.linspace(0.0, t_max_hr, N_t)
 
-    sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr}
+    sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr,
+                  "k_el_per_hr": _k_el(config, k_el_per_hr)}
     C_rt = predict_concentration_field(model, r, t, sim_params, norm_stats)
     C_final = C_rt[-1, :]
 
-    threshold = SUBTHERAPEUTIC_THRESHOLD_FACTOR * config["biology"]["IC50_uM"]
-    resistant_mask = C_final < threshold
+    threshold = subtherapeutic_threshold_uM(config)
+    resistant_mask = exposure_profile(C_rt, config) < threshold
 
     return {
         "r_um": r,
@@ -98,6 +133,7 @@ def grid_search_radius(
     norm_stats: dict,
     k_d_per_hr: float = DEFAULT_K_D_PER_HR,
     t_max_hr: float = DEFAULT_T_MAX_HR,
+    k_el_per_hr: float | None = None,
 ) -> dict:
     """Grid search (d_NP, C0) at a fixed radius to maximize eta.
 
@@ -115,14 +151,14 @@ def grid_search_radius(
     eta_grid = np.zeros((len(d_NP_grid), len(C0_grid)))
     for i, d_NP in enumerate(d_NP_grid):
         for j, C0 in enumerate(C0_grid):
-            eta_grid[i, j] = kill_fraction(model, R_um, d_NP, C0, config, norm_stats, k_d_per_hr, t_max_hr)
+            eta_grid[i, j] = kill_fraction(model, R_um, d_NP, C0, config, norm_stats, k_d_per_hr, t_max_hr, k_el_per_hr=k_el_per_hr)
     elapsed = time.perf_counter() - t0
 
     best_i, best_j = np.unravel_index(np.argmax(eta_grid), eta_grid.shape)
     d_NP_star, C0_star = float(d_NP_grid[best_i]), float(C0_grid[best_j])
     max_eta = float(eta_grid[best_i, best_j])
 
-    resistance_map = _resistance_map(model, R_um, d_NP_star, C0_star, config, norm_stats, k_d_per_hr, t_max_hr)
+    resistance_map = _resistance_map(model, R_um, d_NP_star, C0_star, config, norm_stats, k_d_per_hr, t_max_hr, k_el_per_hr=k_el_per_hr)
 
     return {
         "R_um": R_um,
@@ -135,6 +171,7 @@ def grid_search_radius(
         "resistance_map": resistance_map,
         "computation_time_s": elapsed,
         "n_combinations": int(eta_grid.size),
+        "k_el_per_hr": _k_el(config, k_el_per_hr),
     }
 
 
@@ -144,10 +181,11 @@ def optimize_all_radii(
     norm_stats: dict,
     k_d_per_hr: float = DEFAULT_K_D_PER_HR,
     t_max_hr: float = DEFAULT_T_MAX_HR,
+    k_el_per_hr: float | None = None,
 ) -> dict:
     """Run grid_search_radius for each radius in optimization.radii_um."""
     return {
-        R_um: grid_search_radius(model, R_um, config, norm_stats, k_d_per_hr, t_max_hr)
+        R_um: grid_search_radius(model, R_um, config, norm_stats, k_d_per_hr, t_max_hr, k_el_per_hr=k_el_per_hr)
         for R_um in config["optimization"]["radii_um"]
     }
 
@@ -158,16 +196,18 @@ def _summarize_field(C_rt: np.ndarray, r: np.ndarray, t: np.ndarray, config: dic
     cytotox = cytotoxicity_map(C_rt, t, config)
     pen_depth = penetration_depth(cytotox, r, config)
 
-    C_final = C_rt[-1, :]
-    threshold = SUBTHERAPEUTIC_THRESHOLD_FACTOR * config["biology"]["IC50_uM"]
-    subtherapeutic_mask = C_final < threshold
+    threshold = subtherapeutic_threshold_uM(config)
+    subtherapeutic_mask = exposure_profile(C_rt, config) < threshold
     subtherapeutic_indices = np.where(subtherapeutic_mask)[0]
     # Outer edge of the under-dosed core (0 if the whole tumor is therapeutic).
     subtherapeutic_zone_radius = float(r[subtherapeutic_indices[-1]]) if len(subtherapeutic_indices) else 0.0
 
     # Average concentration gradient magnitude (uM/um) from surface to
-    # center at t_max, as an explicit "steepness" measure for H3.
-    avg_gradient = float(abs(C_rt[-1, -1] - C_rt[-1, 0]) / r[-1])
+    # center, as an explicit "steepness" measure for H3 -- taken on the same
+    # exposure profile as the sub-therapeutic mask (== the t_max profile for a
+    # constant boundary; the per-radius peak when the boundary decays).
+    profile = exposure_profile(C_rt, config)
+    avg_gradient = float(abs(profile[-1] - profile[0]) / r[-1])
 
     return {
         "max_penetration_depth_um": float(pen_depth[-1]),
@@ -185,13 +225,15 @@ def homogeneous_vs_heterogeneous(
     C0_uM: float = 10.0,
     k_d_per_hr: float = DEFAULT_K_D_PER_HR,
     t_max_hr: float = DEFAULT_T_MAX_HR,
+    k_el_per_hr: float | None = None,
 ) -> dict:
     """H3: re-solve the FDM diffusion model with a homogeneous D_eff (the
     arithmetic mean of the three zone D_eff values) and compare against the
     normal three-zone heterogeneous model at a fixed case. This is a physics
     comparison (re-solving the PDE, not querying the trained PINN), matching
     the spec's literal "re-run the diffusion model"."""
-    hetero_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config)
+    k_el_per_hr = _k_el(config, k_el_per_hr)
+    hetero_result = solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config, k_el_per_hr=k_el_per_hr)
 
     const = config["constants"]
     D_free_m2_s = stokes_einstein_diffusivity(d_NP_nm, const["T"], const["eta"], const["k_B"])
@@ -199,7 +241,7 @@ def homogeneous_vs_heterogeneous(
     D_eff_homogeneous = D_free_um2_hr * float(np.mean(list(config["microenvironment"]["f_zone"].values())))
 
     homog_result = solve_fdm(
-        R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config, D_eff_override=D_eff_homogeneous
+        R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config, D_eff_override=D_eff_homogeneous, k_el_per_hr=k_el_per_hr
     )
 
     hetero_summary = _summarize_field(hetero_result["C"], hetero_result["r"], hetero_result["t"], config)
@@ -212,7 +254,8 @@ def homogeneous_vs_heterogeneous(
     )
 
     return {
-        "parameters": {"d_NP_nm": d_NP_nm, "R_um": R_um, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr},
+        "parameters": {"d_NP_nm": d_NP_nm, "R_um": R_um, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr,
+                       "k_el_per_hr": k_el_per_hr},
         "D_eff_homogeneous_um2_per_hr": D_eff_homogeneous,
         "heterogeneous": hetero_summary,
         "homogeneous": homog_summary,
@@ -234,24 +277,26 @@ def speedup_study(
     FDM solver, across n_combinations LHS-sampled parameter combinations."""
     n_combinations = n_combinations or config["optimization"]["speedup_study"]["n_combinations"]
     params = latin_hypercube_sample(n_combinations, config, seed)
+    order = param_order(config)
     fdm_cfg = config["fdm"]
 
     pinn_times = np.zeros(n_combinations)
     fdm_times = np.zeros(n_combinations)
 
     for idx in range(n_combinations):
-        R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr = params[idx]
+        sim_params = {**OPTIONAL_PARAM_DEFAULTS, **dict(zip(order, (float(v) for v in params[idx])))}
+        R_um, d_NP_nm, C0_uM = sim_params["R_um"], sim_params["d_NP_nm"], sim_params["C0_uM"]
+        k_d_per_hr, t_max_hr, k_el_per_hr = sim_params["k_d_per_hr"], sim_params["t_max_hr"], sim_params["k_el_per_hr"]
 
         r = radial_grid(R_um, fdm_cfg["N_r"], fdm_cfg["r_min_um"])
         t = np.linspace(0.0, t_max_hr, fdm_cfg["N_t_initial"])
-        sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": t_max_hr}
 
         t0 = time.perf_counter()
         predict_concentration_field(model, r, t, sim_params, norm_stats)
         pinn_times[idx] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config)
+        solve_fdm(R_um, d_NP_nm, C0_uM, k_d_per_hr, t_max_hr, config, k_el_per_hr=k_el_per_hr)
         fdm_times[idx] = time.perf_counter() - t0
 
     speedup_ratios = fdm_times / pinn_times

@@ -107,7 +107,7 @@ def test_resolve_test_simulations_matches_original_raw_sims():
     dataset = _dataset()
     original_test_sims = dataset["sims"]["test"]
     sim_params = [
-        {k: sim[k] for k in ("sim_id", "R_um", "d_NP_nm", "C0_uM", "k_d_per_hr", "t_max_hr")}
+        {k: sim[k] for k in ("sim_id", "R_um", "d_NP_nm", "C0_uM", "k_d_per_hr", "t_max_hr", "k_el_per_hr")}
         for sim in original_test_sims
     ]
 
@@ -189,6 +189,7 @@ def test_evaluate_h2_hypothesis_shape_and_types():
         "C0_uM": {"min": 0.1, "max": 20.0},
         "k_d_per_hr": {"min": 0.005, "max": 0.05},
         "t_max_hr": {"min": 24.0, "max": 72.0},
+        "k_el_per_hr": {"min": 0.0136, "max": 0.381},
     }
     result = evaluate_h2_hypothesis(model, norm_stats, CONFIG)
     assert isinstance(result["pass"], bool)

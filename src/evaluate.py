@@ -24,7 +24,7 @@ import torch
 
 from src.biology import evaluate_h4_hypothesis, predict_concentration_field, viability_map
 from src.config import resolve_path
-from src.data_pipeline import PARAM_ORDER, _solve_one
+from src.data_pipeline import OPTIONAL_PARAM_DEFAULTS, PARAM_ORDER, _solve_one, default_k_el
 from src.losses import pde_residual
 from src.microenvironment import assign_zones, oxygen_gradient, radial_grid
 
@@ -65,15 +65,38 @@ def compute_pde_residual_stats(
     }
 
 
+def concentration_threshold_uM(config: dict, C0_uM: float, relative_fraction: float | None = None) -> float:
+    """Concentration (uM) the drug front must exceed to count as "penetrated".
+
+    Controlled by `evaluation.penetration_threshold` in the config:
+      mode "absolute" (default): a fixed `absolute_uM` (1 uM = IC50) --
+        needed once the surface concentration decays (k_el > 0), since a
+        fraction of the *initial* C0 stops meaning anything at late times.
+      mode "relative" (legacy): `relative_fraction` * C0 (callers may pass
+        their own `relative_fraction`, e.g. paper.penetration_threshold_fraction).
+    A config without the block behaves like the legacy relative mode at 0.1.
+    """
+    pt = config.get("evaluation", {}).get("penetration_threshold", {"mode": "relative", "relative_fraction": 0.1})
+    mode = pt.get("mode", "relative")
+    if mode == "absolute":
+        return float(pt["absolute_uM"])
+    if mode != "relative":
+        raise ValueError(f"evaluation.penetration_threshold.mode must be 'absolute' or 'relative', got {mode!r}")
+    frac = relative_fraction if relative_fraction is not None else pt.get("relative_fraction", 0.1)
+    return float(frac) * C0_uM
+
+
 def penetration_depth_from_concentration(
-    C_rt: np.ndarray, r: np.ndarray, C0_uM: float, threshold_fraction: float = 0.1
+    C_rt: np.ndarray, r: np.ndarray, C0_uM: float, threshold_fraction: float = 0.1, threshold_uM: float | None = None
 ) -> np.ndarray:
     """Depth (um) the drug front has penetrated inward from the tumor
     surface at each time step: R minus the innermost radius where C exceeds
-    threshold_fraction*C0 (0 if no point exceeds it). Concentration-based
-    (not the cytotoxicity-based src.biology.penetration_depth), matching the
-    metric this module's "penetration RMSE" evaluates."""
-    threshold = threshold_fraction * C0_uM
+    the threshold (0 if no point exceeds it). The threshold is `threshold_uM`
+    if given, else threshold_fraction*C0 (see concentration_threshold_uM for
+    the config-driven choice). Concentration-based (not the cytotoxicity-based
+    src.biology.penetration_depth), matching the metric this module's
+    "penetration RMSE" evaluates."""
+    threshold = threshold_uM if threshold_uM is not None else threshold_fraction * C0_uM
     R = r[-1]
     N_t = C_rt.shape[0]
     depths = np.zeros(N_t)
@@ -90,8 +113,9 @@ def compute_penetration_rmse(model, sims: list[dict], norm_stats: dict, config: 
     for sim in sims:
         r, t = sim["r"], sim["t"]
         C_pred = predict_concentration_field(model, r, t, sim, norm_stats)
-        pen_pred = penetration_depth_from_concentration(C_pred, r, sim["C0_uM"])
-        pen_true = penetration_depth_from_concentration(sim["C"], r, sim["C0_uM"])
+        thr = concentration_threshold_uM(config, sim["C0_uM"])
+        pen_pred = penetration_depth_from_concentration(C_pred, r, sim["C0_uM"], threshold_uM=thr)
+        pen_true = penetration_depth_from_concentration(sim["C"], r, sim["C0_uM"], threshold_uM=thr)
         terms.append((pen_pred - pen_true) ** 2)
     return float(np.sqrt(np.mean(np.concatenate(terms))))
 
@@ -112,7 +136,12 @@ def resolve_test_simulations(
     test-set simulation. Reuses src.data_pipeline's parallel-solve worker so
     the physics is identical to how the training dataset itself was built."""
     sim_params = sim_params if sim_params is not None else load_test_sim_params(config)
-    args = [(p["sim_id"], np.array([p[k] for k in PARAM_ORDER]), config) for p in sim_params]
+    # Always pass all 6 values; a sim_params.json written before k_el existed
+    # has no k_el_per_hr key, and those sims were solved with k_el = 0.
+    args = [
+        (p["sim_id"], np.array([p.get(k, OPTIONAL_PARAM_DEFAULTS.get(k)) for k in PARAM_ORDER], dtype=float), config)
+        for p in sim_params
+    ]
 
     if n_jobs == 1:
         results = [_solve_one(a) for a in args]
@@ -187,19 +216,24 @@ def evaluate_h2_hypothesis(
     R_um: float = 400.0,
     C0_uM: float = 10.0,
     k_d_per_hr: float = 0.01,
+    k_el_per_hr: float | None = None,
 ) -> dict:
     """H2: at t=72hr and R=400um, the penetration-depth difference between a
     10nm and a 200nm nanoparticle exceeds 100um (smaller NPs diffuse faster
-    and so penetrate deeper)."""
+    and so penetrate deeper). `k_el_per_hr` defaults to the paper baseline
+    (0 if k_el isn't enabled in the config)."""
+    k_el_per_hr = default_k_el(config) if k_el_per_hr is None else k_el_per_hr
+    threshold_uM = concentration_threshold_uM(config, C0_uM)
     hyp_cfg = config["evaluation"]["hypotheses"]
     fdm_cfg = config["fdm"]
     r = radial_grid(R_um, fdm_cfg["N_r"], fdm_cfg["r_min_um"])
     t = np.array([72.0])
 
     def depth_for(d_NP_nm: float) -> float:
-        sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": 72.0}
+        sim_params = {"R_um": R_um, "d_NP_nm": d_NP_nm, "C0_uM": C0_uM, "k_d_per_hr": k_d_per_hr, "t_max_hr": 72.0,
+                      "k_el_per_hr": k_el_per_hr}
         C_pred = predict_concentration_field(model, r, t, sim_params, norm_stats)
-        return float(penetration_depth_from_concentration(C_pred, r, C0_uM)[0])
+        return float(penetration_depth_from_concentration(C_pred, r, C0_uM, threshold_uM=threshold_uM)[0])
 
     depth_10 = depth_for(10.0)
     depth_200 = depth_for(200.0)
@@ -211,6 +245,8 @@ def evaluate_h2_hypothesis(
         "depth_200nm_um": depth_200,
         "difference_um": difference,
         "target_um": hyp_cfg["H2_penetration_diff_um"],
+        "k_el_per_hr": k_el_per_hr,
+        "penetration_threshold_uM": threshold_uM,
     }
 
 

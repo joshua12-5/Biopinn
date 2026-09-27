@@ -120,6 +120,7 @@ def test_predict_concentration_field_shape_and_hard_ic():
         "C0_uM": {"min": 0.1, "max": 20.0},
         "k_d_per_hr": {"min": 0.005, "max": 0.05},
         "t_max_hr": {"min": 24.0, "max": 72.0},
+        "k_el_per_hr": {"min": 0.0136, "max": 0.381},
     }
 
     C_rt = predict_concentration_field(model, r, t, sim_params, norm_stats)
@@ -141,6 +142,7 @@ def test_compute_biological_response_end_to_end_shapes():
         "C0_uM": {"min": 0.1, "max": 20.0},
         "k_d_per_hr": {"min": 0.005, "max": 0.05},
         "t_max_hr": {"min": 24.0, "max": 72.0},
+        "k_el_per_hr": {"min": 0.0136, "max": 0.381},
     }
 
     result = compute_biological_response(model, r, t, sim_params, norm_stats, CONFIG)
