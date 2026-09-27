@@ -36,8 +36,9 @@ for interactive exploration.
 - **Biological response:** Hill-equation drug-induced death rate →
   time-integrated survival fraction (hazard form, always in `(0,1]`) →
   viability `V(r,t)` and cytotoxicity `Cyt(r,t)` maps → penetration depth.
-- **PINN:** 5×96 tanh MLP, Xavier init, **parametric 7-dim input**
-  `(r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm)` so
+- **PINN:** 5×96 tanh MLP, Xavier init, **parametric 8-dim input**
+  `(r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm, k_el_norm)`
+  (7-dim without `k_el`, see below) so
   *one* trained model generalizes across the full 5D physical parameter
   space (extends the base "(r_norm, t_norm)" skeleton — required so the
   optimization surrogate can query arbitrary `(d_NP, C0, R)` combinations
@@ -51,6 +52,19 @@ for interactive exploration.
 Full hyperparameters, physical constants, and acceptance thresholds live in
 `configs/default_config.yaml`; every `src/` module reads from it rather than
 hard-coding numbers.
+
+## Nano-Tumor Database clearance adaptation
+
+The surface boundary can decay with plasma clearance, `C(R,t) = C0·exp(-k_el·t)`,
+and `k_el_per_hr` is sampled as a 6th parameter by default (range
+0.0136–0.381 hr⁻¹, baseline 0.0684 hr⁻¹). Those values come from blood/plasma
+fits to the Nano-Tumor Database 2023 (Chen et al. 2023, *ACS Nano*) made by
+`scripts/adapt_ntd.py`; the derived tables are in `data/external/ntd/`.
+Penetration depth now uses an absolute 1 µM threshold by default.
+`--experiment experiment_legacy_5param` restores the previous behavior (and
+loads checkpoints trained before this change). What changed, the limitations,
+and paper/code discrepancies found along the way:
+[docs/NTD_ADAPTATION.md](docs/NTD_ADAPTATION.md).
 
 ## Two-part execution split
 

@@ -2,14 +2,15 @@
 
 The 5x96 tanh fully-connected network with Xavier init and the hard-IC
 output transform C_NN = sigmoid(f_theta(x)) * t_norm. Input `x` is the
-7-column point layout produced by src/data_pipeline.py:
+point layout produced by src/data_pipeline.py -- 8 columns by default, 7 with
+dataset.sample_k_el: false (model.input_dim must match):
 
-    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm]
+    [r_norm, t_norm, R_norm, d_NP_norm, C0_norm, k_d_norm, t_max_norm(, k_el_norm)]
 
-(r_norm, t_norm) are normalized per-simulation; the remaining five columns
-condition the prediction on which point in the 5D physical parameter space
+(r_norm, t_norm) are normalized per-simulation; the remaining columns
+condition the prediction on which point in the physical parameter space
 is being queried, so one trained model generalizes across tumor radius,
-nanoparticle size, dose, decay rate, and duration -- needed for Phase 10's
+nanoparticle size, dose, decay rate, duration, and clearance -- needed for Phase 10's
 optimization surrogate. Shared module: constructed identically on Colab (for
 training) and locally (for loading a checkpoint into src/biology.py,
 src/evaluate.py, and app/server.py).
@@ -43,7 +44,7 @@ class RandomFourierFeatures(nn.Module):
 
 
 class BIOPINN(nn.Module):
-    """Physics-informed network mapping the 7-column input to C_norm."""
+    """Physics-informed network mapping the point-tensor input to C_norm."""
 
     def __init__(self, config: dict):
         super().__init__()
